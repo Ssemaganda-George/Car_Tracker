@@ -6,6 +6,176 @@ import os
 import hashlib
 import plotly.express as px
 import plotly.graph_objects as go
+import json
+
+# ---------- Dark Theme Configuration ----------
+def apply_dark_theme():
+    st.markdown("""
+    <style>
+    .stApp {
+        background-color: #0e1117;
+        color: #fafafa;
+    }
+    .stSidebar {
+        background-color: #262730;
+    }
+    .stMetric {
+        background-color: #262730;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border: 1px solid #464646;
+    }
+    .stDataFrame {
+        background-color: #262730;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+st.set_page_config(page_title="🚗 Car Booking & Tracking", layout="wide")
+apply_dark_theme()
+
+# ---------- Persistent Storage Functions ----------
+def init_persistent_storage():
+    """Initialize persistent data storage across sessions"""
+    if 'persistent_data' not in st.session_state:
+        st.session_state.persistent_data = {
+            'users': {},
+            'cars': {},
+            'bookings': {},
+            'expenses': {}
+        }
+    
+    # Try to load from Streamlit secrets if available (for hosted deployment)
+    try:
+        if hasattr(st, 'secrets') and 'data_store' in st.secrets:
+            stored_data = json.loads(st.secrets.data_store)
+            st.session_state.persistent_data.update(stored_data)
+    except:
+        pass
+
+def save_to_persistent_storage(data_type, user_id, data):
+    """Save data to persistent storage"""
+    if 'persistent_data' not in st.session_state:
+        init_persistent_storage()
+    
+    key = f"{user_id}_{data_type}" if user_id else data_type
+    st.session_state.persistent_data[data_type][key] = data.to_dict('records') if hasattr(data, 'to_dict') else data
+
+def load_from_persistent_storage(data_type, user_id, columns):
+    """Load data from persistent storage"""
+    if 'persistent_data' not in st.session_state:
+        init_persistent_storage()
+    
+    key = f"{user_id}_{data_type}" if user_id else data_type
+    
+    if key in st.session_state.persistent_data.get(data_type, {}):
+        data = st.session_state.persistent_data[data_type][key]
+        if isinstance(data, list):
+            return pd.DataFrame(data)
+        else:
+            return pd.DataFrame(data)
+    
+    return pd.DataFrame(columns=columns)
+
+# ---------- Authentication Functions ----------
+def hash_password(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
+
+def load_users():
+    # First try persistent storage
+    if 'persistent_data' in st.session_state and 'users' in st.session_state.persistent_data:
+        users_data = st.session_state.persistent_data['users']
+        if users_data:
+            # Convert dict to DataFrame
+            all_users = []
+            for user_data in users_data.values():
+                if isinstance(user_data, list) and user_data:
+                    all_users.extend(user_data)
+                elif isinstance(user_data, dict):
+                    all_users.append(user_data)
+            
+            if all_users:
+                return pd.DataFrame(all_users)
+    
+    # Fall back to CSV file
+    if os.path.exists("users.csv"):
+        users_df = pd.read_csv("users.csv")
+        # Save to persistent storage
+        save_to_persistent_storage('users', None, users_df)
+        return users_df
+    else:
+        # Create default admin user
+        default_user = pd.DataFrame({
+            "username": ["admin"], 
+            "password": [hash_password("Mpigi@2024")], 
+            "full_name": ["System Administrator"],
+            "created_date": [dt.date.today().strftime("%Y-%m-%d")]
+        })
+        save_to_persistent_storage('users', None, default_user)
+        default_user.to_csv("users.csv", index=False)
+        return default_user
+
+def authenticate(username, password):
+    users = load_users()
+    hashed_password = hash_password(password)
+    user = users[(users["username"] == username) & (users["password"] == hashed_password)]
+    return not user.empty, user.iloc[0]["full_name"] if not user.empty else ""
+
+def register_user(username, password, full_name):
+    users = load_users()
+    if username in users["username"].values:
+        return False, "Username already exists"
+    
+    new_user = pd.DataFrame({
+        "username": [username],
+        "password": [hash_password(password)],
+        "full_name": [full_name],
+        "created_date": [dt.date.today().strftime("%Y-%m-%d")]
+    })
+    users = pd.concat([users, new_user], ignore_index=True)
+    save_to_persistent_storage('users', None, users)
+    users.to_csv("users.csv", index=False)
+    return True, "User registered successfully"
+
+# ---------- Enhanced Data Management Functions ----------
+def load_data(filename, columns, user_prefix=""):
+    """Load data with persistent storage fallback"""
+    data_type = filename.replace('.csv', '')
+    
+    # First try persistent storage
+    df = load_from_persistent_storage(data_type, user_prefix, columns)
+    if not df.empty:
+        return df
+    
+    # Fall back to CSV file
+    full_filename = f"{user_prefix}_{filename}" if user_prefix else filename
+    if os.path.exists(full_filename):
+        try:
+            df = pd.read_csv(full_filename)
+            for col in columns:
+                if col not in df.columns:
+                    df[col] = ""
+            # Save to persistent storage
+            save_to_persistent_storage(data_type, user_prefix, df)
+            return df
+        except Exception:
+            return pd.DataFrame(columns=columns)
+    else:
+        return pd.DataFrame(columns=columns)
+
+def save_data(df, filename, user_prefix=""):
+    """Save data with persistent storage"""
+    data_type = filename.replace('.csv', '')
+    
+    # Save to persistent storage
+    save_to_persistent_storage(data_type, user_prefix, df)
+    
+    # Also save to CSV file for backup
+    full_filename = f"{user_prefix}_{filename}" if user_prefix else filename
+    df.to_csv(full_filename, index=False)
+
+# Initialize persistent storage on app start
+init_persistent_storage()
 
 # ---------- Dark Theme Configuration ----------
 def apply_dark_theme():
@@ -38,8 +208,27 @@ def hash_password(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 def load_users():
+    # First try persistent storage
+    if 'persistent_data' in st.session_state and 'users' in st.session_state.persistent_data:
+        users_data = st.session_state.persistent_data['users']
+        if users_data:
+            # Convert dict to DataFrame
+            all_users = []
+            for user_data in users_data.values():
+                if isinstance(user_data, list) and user_data:
+                    all_users.extend(user_data)
+                elif isinstance(user_data, dict):
+                    all_users.append(user_data)
+            
+            if all_users:
+                return pd.DataFrame(all_users)
+    
+    # Fall back to CSV file
     if os.path.exists("users.csv"):
-        return pd.read_csv("users.csv")
+        users_df = pd.read_csv("users.csv")
+        # Save to persistent storage
+        save_to_persistent_storage('users', None, users_df)
+        return users_df
     else:
         # Create default admin user
         default_user = pd.DataFrame({
@@ -48,6 +237,7 @@ def load_users():
             "full_name": ["System Administrator"],
             "created_date": [dt.date.today().strftime("%Y-%m-%d")]
         })
+        save_to_persistent_storage('users', None, default_user)
         default_user.to_csv("users.csv", index=False)
         return default_user
 
@@ -69,6 +259,7 @@ def register_user(username, password, full_name):
         "created_date": [dt.date.today().strftime("%Y-%m-%d")]
     })
     users = pd.concat([users, new_user], ignore_index=True)
+    save_to_persistent_storage('users', None, users)
     users.to_csv("users.csv", index=False)
     return True, "User registered successfully"
 
@@ -228,7 +419,7 @@ def show_login():
 
 # ---------- Main App with Enhanced Features ----------
 def main_app():
-    # Initialize user-specific data
+    # Initialize user-specific data with persistent storage
     user_prefix = st.session_state.username
     
     if 'data_loaded' not in st.session_state or st.session_state.get('current_user') != user_prefix:
@@ -246,13 +437,22 @@ def main_app():
     with st.sidebar:
         st.markdown(f"### Welcome, {st.session_state.full_name}! 👋")
         
+        # Enhanced logout with data preservation warning
         if st.button("🚪 Logout"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+            st.warning("⚠️ Make sure to export your data before logging out if needed!")
+            if st.button("✅ Confirm Logout"):
+                # Only clear login session, keep persistent data
+                keys_to_remove = ['logged_in', 'username', 'full_name', 'data_loaded', 'current_user', 'cars', 'bookings', 'expenses']
+                for key in keys_to_remove:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
         
         st.markdown("---")
         menu = st.radio("Navigation", ["📊 Dashboard", "🚗 Cars", "📅 Bookings", "💰 Expenses", "🔧 Maintenance"])
+        
+        # Add data management section
+        show_data_management_section()
 
     # ---------- Enhanced Dashboard ----------
     if menu == "📊 Dashboard":
