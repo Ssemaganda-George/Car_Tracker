@@ -873,6 +873,13 @@ def load_pending_bookings():
     
     return st.session_state.pending_bookings
 
+def get_owner_cars(owner_username):
+    """Get cars for a specific owner only"""
+    owner_cars = load_data("cars.csv", ["id", "car_name", "plate_number", "model", "status", "last_service_date", "next_service_date"], owner_username)
+    if not owner_cars.empty:
+        owner_cars['owner'] = owner_username
+    return owner_cars
+
 # ---------- User-Specific Public Booking Page ----------
 def show_public_booking():
     st.markdown("# 🚗 Car Rental Booking")
