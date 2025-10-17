@@ -836,6 +836,54 @@ def main_app():
         else:
             st.info("No cars registered yet.")
 
+# ---------- Enhanced Sidebar with Data Management ----------
+def show_data_management_section():
+    """Show data management options in sidebar"""
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📊 Data Management")
+    
+    # Export data
+    if st.sidebar.button("📤 Export Data"):
+        user_prefix = st.session_state.username
+        export_data = {
+            'cars': st.session_state.cars.to_dict('records') if not st.session_state.cars.empty else [],
+            'bookings': st.session_state.bookings.to_dict('records') if not st.session_state.bookings.empty else [],
+            'expenses': st.session_state.expenses.to_dict('records') if not st.session_state.expenses.empty else [],
+            'export_date': dt.datetime.now().isoformat()
+        }
+        
+        st.sidebar.download_button(
+            label="💾 Download Backup",
+            data=json.dumps(export_data, indent=2),
+            file_name=f"{user_prefix}_backup_{dt.date.today().strftime('%Y%m%d')}.json",
+            mime="application/json"
+        )
+    
+    # Import data
+    uploaded_file = st.sidebar.file_uploader("📥 Import Backup", type=['json'])
+    if uploaded_file is not None:
+        try:
+            import_data = json.load(uploaded_file)
+            user_prefix = st.session_state.username
+            
+            # Restore data
+            if 'cars' in import_data and import_data['cars']:
+                st.session_state.cars = pd.DataFrame(import_data['cars'])
+                save_data(st.session_state.cars, "cars.csv", user_prefix)
+            
+            if 'bookings' in import_data and import_data['bookings']:
+                st.session_state.bookings = pd.DataFrame(import_data['bookings'])
+                save_data(st.session_state.bookings, "bookings.csv", user_prefix)
+            
+            if 'expenses' in import_data and import_data['expenses']:
+                st.session_state.expenses = pd.DataFrame(import_data['expenses'])
+                save_data(st.session_state.expenses, "expenses.csv", user_prefix)
+            
+            st.sidebar.success("✅ Data imported successfully!")
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"❌ Import failed: {str(e)}")
+
 # ---------- App Entry Point ----------
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
