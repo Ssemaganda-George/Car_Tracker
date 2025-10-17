@@ -338,9 +338,34 @@ def main_app():
         st.markdown("---")
         st.markdown("### 🔔 Notifications")
         
-        # Debug: Always show this first
-        st.write(f"Debug: Found {len(pending_bookings)} total pending bookings")
-        st.write(f"Debug: Found {len(user_pending)} for user '{user_prefix}'")
+        # Enhanced Debug: Always show this first
+        st.write(f"**Debug Info:**")
+        st.write(f"📊 Total pending bookings: {len(pending_bookings)}")
+        st.write(f"👤 Your pending bookings: {len(user_pending)}")
+        st.write(f"🔑 Your username: '{user_prefix}'")
+        
+        # Show raw pending bookings data
+        if pending_bookings:
+            st.write("**All Pending Bookings:**")
+            for i, booking in enumerate(pending_bookings):
+                owner = booking.get('owner', 'NO OWNER')
+                status = booking.get('status', 'NO STATUS') 
+                client = booking.get('client_name', 'NO CLIENT')
+                st.caption(f"#{i+1}: Owner='{owner}', Status='{status}', Client='{client}'")
+                
+                # Highlight if this booking belongs to current user
+                if owner == user_prefix and status == 'Pending':
+                    st.success(f"👆 This one is YOURS!")
+        else:
+            st.write("**No pending bookings found in system**")
+        
+        # Show session state for debugging
+        if st.checkbox("🔍 Show Session State"):
+            st.write("**Raw pending_bookings from session state:**")
+            st.write(st.session_state.get('pending_bookings', 'NOT FOUND'))
+            st.write("**Raw persistent_data:**")
+            pending_data = st.session_state.persistent_data.get('pending_bookings', {})
+            st.write(pending_data)
         
         # Notification icon for pending bookings - ENHANCED
         if user_pending:
@@ -393,11 +418,20 @@ def main_app():
             if len(user_pending) > 2:
                 st.caption(f"... and {len(user_pending) - 2} more requests")
         else:
-            # Show when no notifications
-            st.info("🔕 No pending requests")
+            # Show when no notifications - with more detail
+            st.info("🔕 No pending requests for you")
             if pending_bookings:
-                st.caption(f"({len(pending_bookings)} total system requests)")
+                st.caption(f"({len(pending_bookings)} total system requests for other users)")
+            else:
+                st.caption("No pending requests in entire system")
         
+        # Manual refresh button
+        if st.button("🔄 Refresh Notifications"):
+            # Force reload of pending bookings
+            if 'pending_bookings' in st.session_state:
+                del st.session_state.pending_bookings
+            st.rerun()
+
         # Show data summary with pending bookings
         st.markdown("---")
         st.markdown("### 📈 Your Data Summary")
@@ -1071,7 +1105,7 @@ def main_app():
                     else:
                         st.error("Please fill in all fields correctly.")
 
-    # ---------- Maintenance Section (unchanged) ----------
+    # ---------- Maintenance Section ----------
     elif menu == "🔧 Maintenance":
         st.markdown("# 🔧 Maintenance Schedule")
         if not cars.empty:
@@ -1082,7 +1116,7 @@ def main_app():
 
 # ---------- Public Booking Functions ----------
 def save_public_booking(booking_data):
-    """Save public booking to pending bookings"""
+    """Save public booking to pending bookings with enhanced debugging"""
     # Initialize persistent storage if not exists
     if 'persistent_data' not in st.session_state:
         init_persistent_storage()
