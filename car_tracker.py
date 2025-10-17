@@ -326,7 +326,7 @@ def main_app():
     bookings = st.session_state.bookings
     expenses = st.session_state.expenses
 
-    # Load pending bookings
+    # Load pending bookings FIRST - before sidebar
     pending_bookings = load_pending_bookings()
     user_pending = [b for b in pending_bookings if b.get('owner') == user_prefix and b.get('status') == 'Pending']
 
@@ -334,35 +334,69 @@ def main_app():
     with st.sidebar:
         st.markdown(f"### Welcome, {st.session_state.full_name}! 👋")
         
-        # Notification icon for pending bookings
+        # ALWAYS show notification area (even if empty) to test
+        st.markdown("---")
+        st.markdown("### 🔔 Notifications")
+        
+        # Debug: Always show this first
+        st.write(f"Debug: Found {len(pending_bookings)} total pending bookings")
+        st.write(f"Debug: Found {len(user_pending)} for user '{user_prefix}'")
+        
+        # Notification icon for pending bookings - ENHANCED
         if user_pending:
             st.markdown(f"""
             <div style="
                 background: linear-gradient(90deg, #ff6b6b, #ee5a52);
                 color: white;
-                padding: 10px 15px;
-                border-radius: 10px;
-                margin: 10px 0;
+                padding: 15px 15px;
+                border-radius: 12px;
+                margin: 15px 0;
                 text-align: center;
                 font-weight: bold;
-                box-shadow: 0 2px 10px rgba(255, 107, 107, 0.3);
-                animation: pulse 2s infinite;
+                font-size: 16px;
+                box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+                animation: pulse-notification 2s infinite;
+                border: 2px solid rgba(255, 255, 255, 0.3);
             ">
-                🔔 {len(user_pending)} New Booking Request{"s" if len(user_pending) > 1 else ""}!
+                🔔 {len(user_pending)} NEW BOOKING REQUEST{"S" if len(user_pending) > 1 else ""}!
             </div>
             <style>
-            @keyframes pulse {{
-                0% {{ box-shadow: 0 2px 10px rgba(255, 107, 107, 0.3); }}
-                50% {{ box-shadow: 0 2px 20px rgba(255, 107, 107, 0.6); }}
-                100% {{ box-shadow: 0 2px 10px rgba(255, 107, 107, 0.3); }}
+            @keyframes pulse-notification {{
+                0% {{ 
+                    box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+                    transform: scale(1);
+                }}
+                50% {{ 
+                    box-shadow: 0 6px 25px rgba(255, 107, 107, 0.7);
+                    transform: scale(1.02);
+                }}
+                100% {{ 
+                    box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+                    transform: scale(1);
+                }}
             }}
             </style>
             """, unsafe_allow_html=True)
             
-            if st.button("🔔 View Requests", key="notification_btn", use_container_width=True):
+            # Make the button more prominent
+            if st.button("🚨 VIEW URGENT REQUESTS 🚨", key="notification_btn", use_container_width=True, type="primary"):
                 # Force navigation to Dashboard
                 st.session_state.force_dashboard = True
                 st.rerun()
+                
+            # Show preview of requests
+            st.markdown("**Quick Preview:**")
+            for i, booking in enumerate(user_pending[:2]):  # Show first 2
+                st.markdown(f"• **{booking['client_name']}** - {booking.get('car_name', 'Unknown Car')}")
+                st.caption(f"📅 {booking['start_date']} to {booking['end_date']}")
+            
+            if len(user_pending) > 2:
+                st.caption(f"... and {len(user_pending) - 2} more requests")
+        else:
+            # Show when no notifications
+            st.info("🔕 No pending requests")
+            if pending_bookings:
+                st.caption(f"({len(pending_bookings)} total system requests)")
         
         # Show data summary with pending bookings
         st.markdown("---")
@@ -371,7 +405,7 @@ def main_app():
         st.write(f"📅 Bookings: {len(bookings)}")
         st.write(f"💰 Expenses: {len(expenses)}")
         if user_pending:
-            st.write(f"⏳ Pending Requests: {len(user_pending)}")
+            st.write(f"🔥 **URGENT: {len(user_pending)} Pending Requests**")
         
         # Enhanced Public booking link section
         st.markdown("---")
@@ -392,6 +426,28 @@ def main_app():
         # QR Code suggestion
         st.markdown("💡 **Tip:** Create a QR code with this URL for easy sharing!")
         
+        # ---------- Test Button to Create Fake Booking ----------
+        st.markdown("---")
+        st.markdown("### 🧪 Testing")
+        if st.button("🧪 Create Test Booking", help="Create a fake booking for testing"):
+            test_booking = {
+                'owner': user_prefix,
+                'car_id': 1,
+                'car_name': 'Test Car',
+                'car_model': 'Test Model',
+                'plate_number': 'TEST123',
+                'client_name': 'Test Customer',
+                'client_phone': '+256700000000',
+                'client_email': 'test@example.com',
+                'start_date': '2024-01-15',
+                'end_date': '2024-01-20',
+                'purpose': 'Testing',
+                'additional_notes': 'This is a test booking'
+            }
+            save_public_booking(test_booking)
+            st.success("Test booking created!")
+            st.rerun()
+        
         # ---------- Logout ----------
         if st.button("🚪 Logout"):
             # Clear user session but keep persistent data
@@ -410,26 +466,35 @@ def main_app():
         else:
             menu = st.radio("Navigation", ["📊 Dashboard", "🚗 Cars", "📅 Bookings", "💰 Expenses", "🔧 Maintenance"])
         
-        # Add notification badge to Dashboard option
+        # Add notification badge to Dashboard option - ENHANCED
         if user_pending:
             st.markdown(f"""
             <div style="
-                background: #ff6b6b;
+                background: linear-gradient(45deg, #ff6b6b, #ff4757);
                 color: white;
                 border-radius: 50%;
-                width: 20px;
-                height: 20px;
-                font-size: 12px;
+                width: 25px;
+                height: 25px;
+                font-size: 14px;
                 font-weight: bold;
                 text-align: center;
-                line-height: 20px;
-                position: absolute;
-                margin-top: -35px;
-                margin-left: 120px;
-                z-index: 1000;
+                line-height: 25px;
+                position: fixed;
+                margin-top: -45px;
+                margin-left: 130px;
+                z-index: 9999;
+                box-shadow: 0 2px 10px rgba(255, 107, 107, 0.5);
+                animation: bounce-badge 1s infinite;
             ">
                 {len(user_pending)}
             </div>
+            <style>
+            @keyframes bounce-badge {{
+                0%, 20%, 50%, 80%, 100% {{ transform: translateY(0); }}
+                40% {{ transform: translateY(-5px); }}
+                60% {{ transform: translateY(-2px); }}
+            }}
+            </style>
             """, unsafe_allow_html=True)
         
         # Add data management section
