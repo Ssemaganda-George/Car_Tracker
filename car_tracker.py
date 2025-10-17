@@ -50,6 +50,10 @@ def save_to_persistent_storage(data_type, user_id, data):
     if 'persistent_data' not in st.session_state:
         init_persistent_storage()
     
+    # Ensure the data_type key exists
+    if data_type not in st.session_state.persistent_data:
+        st.session_state.persistent_data[data_type] = {}
+    
     key = f"{user_id}_{data_type}" if user_id else data_type
     
     if hasattr(data, 'to_dict'):
@@ -875,6 +879,14 @@ def main_app():
 # ---------- Public Booking Functions ----------
 def save_public_booking(booking_data):
     """Save public booking to pending bookings"""
+    # Initialize persistent storage if not exists
+    if 'persistent_data' not in st.session_state:
+        init_persistent_storage()
+    
+    # Ensure pending_bookings key exists in persistent storage
+    if 'pending_bookings' not in st.session_state.persistent_data:
+        st.session_state.persistent_data['pending_bookings'] = {}
+    
     if 'pending_bookings' not in st.session_state:
         st.session_state.pending_bookings = []
     
@@ -884,8 +896,12 @@ def save_public_booking(booking_data):
     
     st.session_state.pending_bookings.append(booking_data)
     
-    # Also save to persistent storage
-    save_to_persistent_storage('pending_bookings', None, pd.DataFrame(st.session_state.pending_bookings))
+    # Save to persistent storage with error handling
+    try:
+        save_to_persistent_storage('pending_bookings', None, pd.DataFrame(st.session_state.pending_bookings))
+    except Exception as e:
+        # Fallback: directly save to persistent storage
+        st.session_state.persistent_data['pending_bookings']['pending_bookings'] = st.session_state.pending_bookings
 
 def load_pending_bookings():
     """Load pending bookings from storage"""
