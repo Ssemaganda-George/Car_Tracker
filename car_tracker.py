@@ -389,8 +389,10 @@ def main_app():
         if st.sidebar.checkbox("🔍 Debug Info"):
             st.sidebar.write(f"Total pending bookings: {len(pending_bookings)}")
             st.sidebar.write(f"User pending bookings: {len(user_pending)}")
+            st.sidebar.write(f"Current user: {user_prefix}")
             if pending_bookings:
                 st.sidebar.write("Sample booking owners:", [b.get('owner', 'No owner') for b in pending_bookings[:3]])
+                st.sidebar.write("All pending bookings:", pending_bookings)
         
         # Pending bookings notification
         if user_pending:
@@ -514,8 +516,96 @@ def main_app():
                                     st.rerun()
                     
                     st.divider()
-        else:
-            # Show message when no pending bookings
+
+        # Key Metrics Section - Always show regardless of pending bookings
+        st.markdown("---")
+        
+        # Key Metrics
+        total_income = 0
+        total_expenses = 0
+        
+        if not bookings.empty and "amount_paid" in bookings.columns:
+            total_income = pd.to_numeric(bookings["amount_paid"], errors='coerce').fillna(0).sum()
+        
+        if not expenses.empty and "amount" in expenses.columns:
+            total_expenses = pd.to_numeric(expenses["amount"], errors='coerce').fillna(0).sum()
+        
+        profit = total_income - total_expenses
+        
+        # Metrics Row
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("💰 Total Income", f"UGX {total_income:,.0f}")
+        with col2:
+            st.metric("🧾 Total Expenses", f"UGX {total_expenses:,.0f}")
+        with col3:
+            st.metric("📊 Net Profit", f"UGX {profit:,.0f}", delta=f"{((profit/total_income)*100) if total_income > 0 else 0:.1f}%")
+        with col4:
+            st.metric("🚗 Total Cars", len(cars))
+
+        # Charts Row
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### 📈 Monthly Income Trend")
+            if not bookings.empty:
+                bookings_copy = bookings.copy()
+                bookings_copy['start_date'] = pd.to_datetime(bookings_copy['start_date'])
+                bookings_copy['month'] = bookings_copy['start_date'].dt.to_period('M').astype(str)
+                monthly_income = bookings_copy.groupby('month')['amount_paid'].sum().reset_index()
+                
+                fig = px.line(monthly_income, x='month', y='amount_paid', 
+                             title="Monthly Income", markers=True)
+                fig.update_layout(height=300)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No booking data available")
+
+        with col2:
+            st.markdown("### 🥧 Expense Breakdown")
+            if not expenses.empty:
+                expense_by_type = expenses.groupby('type')['amount'].sum().reset_index()
+                fig = px.pie(expense_by_type, values='amount', names='type', 
+                           title="Expenses by Type")
+                fig.update_layout(height=300)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No expense data available")
+
+        # Status Overview with Quick Actions
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### 🚗 Car Status Overview")
+            if not cars.empty:
+                status_counts = cars['status'].value_counts()
+                fig = px.bar(x=status_counts.index, y=status_counts.values, 
+                           title="Cars by Status", color=status_counts.index)
+                fig.update_layout(height=300)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No cars registered")
+
+        with col2:
+            st.markdown("### ⚡ Quick Actions")
+            active_bookings = bookings[bookings['status'] == 'Booked'] if not bookings.empty else pd.DataFrame()
+            
+            if not active_bookings.empty:
+                st.markdown("**Complete Bookings:**")
+                for _, booking in active_bookings.iterrows():
+                    col_a, col_b = st.columns([3, 1])
+                    with col_a:
+                        st.write(f"📅 {booking['client_name']} - {booking['start_date']}")
+                    with col_b:
+                        if st.button("✅", key=f"complete_{booking['id']}", help="Complete booking"):
+                            if complete_booking(booking['id'], user_prefix):
+                                st.success("Booking completed!")
+                                st.rerun()
+            else:
+                st.info("No active bookings")
+        
+        # Show message about pending bookings if none exist
+        if not user_pending:
             if len(pending_bookings) > 0:
                 st.info(f"ℹ️ No pending booking requests for you. Total system bookings: {len(pending_bookings)}")
             else:
