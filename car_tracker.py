@@ -364,6 +364,111 @@ def main_app():
     if menu == "📊 Dashboard":
         st.markdown("# 📊 Business Dashboard")
         
+        # Pending bookings notification
+        if user_pending:
+            st.warning(f"⚠️ You have {len(user_pending)} pending booking requests!")
+            
+            with st.expander("📋 Pending Booking Requests", expanded=True):
+                for booking in user_pending:
+                    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+                    
+                    with col1:
+                        st.write(f"**{booking['client_name']}** - {booking['car_name']}")
+                        st.write(f"📅 {booking['start_date']} to {booking['end_date']}")
+                        st.write(f"📞 {booking['client_phone']}")
+                        if booking.get('client_email'):
+                            st.write(f"📧 {booking['client_email']}")
+                    
+                    with col2:
+                        if st.button("✅ Approve", key=f"approve_{booking['id']}"):
+                            # Create confirmed booking
+                            new_booking = {
+                                "id": len(bookings)+1,
+                                "car_id": booking['car_id'],
+                                "client_name": booking['client_name'],
+                                "start_date": booking['start_date'],
+                                "end_date": booking['end_date'],
+                                "amount_paid": 0,  # Can be updated later
+                                "status": "Confirmed"
+                            }
+                            
+                            st.session_state.bookings = pd.concat([bookings, pd.DataFrame([new_booking])], ignore_index=True)
+                            update_car_status(booking['car_id'], "Booked", user_prefix)
+                            save_data(st.session_state.bookings, "bookings.csv", user_prefix)
+                            
+                            # Update pending booking status
+                            for i, pb in enumerate(st.session_state.pending_bookings):
+                                if pb['id'] == booking['id']:
+                                    st.session_state.pending_bookings[i]['status'] = 'Approved'
+                            save_to_persistent_storage('pending_bookings', None, pd.DataFrame(st.session_state.pending_bookings))
+                            
+                            st.success("Booking approved!")
+                            st.rerun()
+                    
+                    with col3:
+                        if st.button("✏️ Edit", key=f"edit_{booking['id']}"):
+                            st.session_state[f"edit_booking_{booking['id']}"] = True
+                            st.rerun()
+                    
+                    with col4:
+                        if st.button("❌ Reject", key=f"reject_{booking['id']}"):
+                            # Update pending booking status
+                            for i, pb in enumerate(st.session_state.pending_bookings):
+                                if pb['id'] == booking['id']:
+                                    st.session_state.pending_bookings[i]['status'] = 'Rejected'
+                            save_to_persistent_storage('pending_bookings', None, pd.DataFrame(st.session_state.pending_bookings))
+                            
+                            st.success("Booking rejected!")
+                            st.rerun()
+                    
+                    # Edit form for pending booking
+                    if st.session_state.get(f"edit_booking_{booking['id']}", False):
+                        with st.form(f"edit_pending_{booking['id']}"):
+                            st.markdown("##### Edit Booking Request")
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                new_client_name = st.text_input("Client Name", value=booking['client_name'])
+                                new_start = st.date_input("Start Date", value=pd.to_datetime(booking['start_date']).date())
+                                estimated_amount = st.number_input("Estimated Amount (UGX)", min_value=0)
+                            with col_b:
+                                new_phone = st.text_input("Phone", value=booking['client_phone'])
+                                new_end = st.date_input("End Date", value=pd.to_datetime(booking['end_date']).date())
+                            
+                            col_x, col_y = st.columns(2)
+                            with col_x:
+                                if st.form_submit_button("💾 Save & Approve"):
+                                    # Create booking with edited details
+                                    new_booking = {
+                                        "id": len(bookings)+1,
+                                        "car_id": booking['car_id'],
+                                        "client_name": new_client_name,
+                                        "start_date": new_start.strftime('%Y-%m-%d'),
+                                        "end_date": new_end.strftime('%Y-%m-%d'),
+                                        "amount_paid": estimated_amount,
+                                        "status": "Confirmed"
+                                    }
+                                    
+                                    st.session_state.bookings = pd.concat([bookings, pd.DataFrame([new_booking])], ignore_index=True)
+                                    update_car_status(booking['car_id'], "Booked", user_prefix)
+                                    save_data(st.session_state.bookings, "bookings.csv", user_prefix)
+                                    
+                                    # Update pending booking
+                                    for i, pb in enumerate(st.session_state.pending_bookings):
+                                        if pb['id'] == booking['id']:
+                                            st.session_state.pending_bookings[i]['status'] = 'Approved'
+                                    save_to_persistent_storage('pending_bookings', None, pd.DataFrame(st.session_state.pending_bookings))
+                                    
+                                    del st.session_state[f"edit_booking_{booking['id']}"]
+                                    st.success("Booking edited and approved!")
+                                    st.rerun()
+                            
+                            with col_y:
+                                if st.form_submit_button("❌ Cancel Edit"):
+                                    del st.session_state[f"edit_booking_{booking['id']}"]
+                                    st.rerun()
+                
+                st.divider()
+
         # Key Metrics
         total_income = 0
         total_expenses = 0
@@ -950,6 +1055,111 @@ def main_app():
     if menu == "📊 Dashboard":
         st.markdown("# 📊 Business Dashboard")
         
+        # Pending bookings notification
+        if user_pending:
+            st.warning(f"⚠️ You have {len(user_pending)} pending booking requests!")
+            
+            with st.expander("📋 Pending Booking Requests", expanded=True):
+                for booking in user_pending:
+                    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+                    
+                    with col1:
+                        st.write(f"**{booking['client_name']}** - {booking['car_name']}")
+                        st.write(f"📅 {booking['start_date']} to {booking['end_date']}")
+                        st.write(f"📞 {booking['client_phone']}")
+                        if booking.get('client_email'):
+                            st.write(f"📧 {booking['client_email']}")
+                    
+                    with col2:
+                        if st.button("✅ Approve", key=f"approve_{booking['id']}"):
+                            # Create confirmed booking
+                            new_booking = {
+                                "id": len(bookings)+1,
+                                "car_id": booking['car_id'],
+                                "client_name": booking['client_name'],
+                                "start_date": booking['start_date'],
+                                "end_date": booking['end_date'],
+                                "amount_paid": 0,  # Can be updated later
+                                "status": "Confirmed"
+                            }
+                            
+                            st.session_state.bookings = pd.concat([bookings, pd.DataFrame([new_booking])], ignore_index=True)
+                            update_car_status(booking['car_id'], "Booked", user_prefix)
+                            save_data(st.session_state.bookings, "bookings.csv", user_prefix)
+                            
+                            # Update pending booking status
+                            for i, pb in enumerate(st.session_state.pending_bookings):
+                                if pb['id'] == booking['id']:
+                                    st.session_state.pending_bookings[i]['status'] = 'Approved'
+                            save_to_persistent_storage('pending_bookings', None, pd.DataFrame(st.session_state.pending_bookings))
+                            
+                            st.success("Booking approved!")
+                            st.rerun()
+                    
+                    with col3:
+                        if st.button("✏️ Edit", key=f"edit_{booking['id']}"):
+                            st.session_state[f"edit_booking_{booking['id']}"] = True
+                            st.rerun()
+                    
+                    with col4:
+                        if st.button("❌ Reject", key=f"reject_{booking['id']}"):
+                            # Update pending booking status
+                            for i, pb in enumerate(st.session_state.pending_bookings):
+                                if pb['id'] == booking['id']:
+                                    st.session_state.pending_bookings[i]['status'] = 'Rejected'
+                            save_to_persistent_storage('pending_bookings', None, pd.DataFrame(st.session_state.pending_bookings))
+                            
+                            st.success("Booking rejected!")
+                            st.rerun()
+                    
+                    # Edit form for pending booking
+                    if st.session_state.get(f"edit_booking_{booking['id']}", False):
+                        with st.form(f"edit_pending_{booking['id']}"):
+                            st.markdown("##### Edit Booking Request")
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                new_client_name = st.text_input("Client Name", value=booking['client_name'])
+                                new_start = st.date_input("Start Date", value=pd.to_datetime(booking['start_date']).date())
+                                estimated_amount = st.number_input("Estimated Amount (UGX)", min_value=0)
+                            with col_b:
+                                new_phone = st.text_input("Phone", value=booking['client_phone'])
+                                new_end = st.date_input("End Date", value=pd.to_datetime(booking['end_date']).date())
+                            
+                            col_x, col_y = st.columns(2)
+                            with col_x:
+                                if st.form_submit_button("💾 Save & Approve"):
+                                    # Create booking with edited details
+                                    new_booking = {
+                                        "id": len(bookings)+1,
+                                        "car_id": booking['car_id'],
+                                        "client_name": new_client_name,
+                                        "start_date": new_start.strftime('%Y-%m-%d'),
+                                        "end_date": new_end.strftime('%Y-%m-%d'),
+                                        "amount_paid": estimated_amount,
+                                        "status": "Confirmed"
+                                    }
+                                    
+                                    st.session_state.bookings = pd.concat([bookings, pd.DataFrame([new_booking])], ignore_index=True)
+                                    update_car_status(booking['car_id'], "Booked", user_prefix)
+                                    save_data(st.session_state.bookings, "bookings.csv", user_prefix)
+                                    
+                                    # Update pending booking
+                                    for i, pb in enumerate(st.session_state.pending_bookings):
+                                        if pb['id'] == booking['id']:
+                                            st.session_state.pending_bookings[i]['status'] = 'Approved'
+                                    save_to_persistent_storage('pending_bookings', None, pd.DataFrame(st.session_state.pending_bookings))
+                                    
+                                    del st.session_state[f"edit_booking_{booking['id']}"]
+                                    st.success("Booking edited and approved!")
+                                    st.rerun()
+                            
+                            with col_y:
+                                if st.form_submit_button("❌ Cancel Edit"):
+                                    del st.session_state[f"edit_booking_{booking['id']}"]
+                                    st.rerun()
+                
+                st.divider()
+
         # Key Metrics
         total_income = 0
         total_expenses = 0
@@ -1403,3 +1613,23 @@ else:
         main_app()
     else:
         show_login()
+
+# ---------- App Entry Point with Fixed URL Handling ----------
+def main():
+    # Check URL parameters for public booking
+    query_params = st.query_params.to_dict() if hasattr(st.query_params, 'to_dict') else dict(st.query_params)
+    
+    if query_params.get("page") == "booking":
+        show_public_booking()
+    else:
+        if 'logged_in' not in st.session_state:
+            st.session_state.logged_in = False
+
+        if st.session_state.logged_in:
+            main_app()
+        else:
+            show_login()
+
+# Run the app
+if __name__ == "__main__":
+    main()
