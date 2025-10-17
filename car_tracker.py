@@ -321,17 +321,617 @@ def main_app():
     bookings = st.session_state.bookings
     expenses = st.session_state.expenses
 
+    # Load pending bookings
+    pending_bookings = load_pending_bookings()
+    user_pending = [b for b in pending_bookings if b.get('owner') == user_prefix and b.get('status') == 'Pending']
+
     # ---------- Enhanced Sidebar ----------
     with st.sidebar:
         st.markdown(f"### Welcome, {st.session_state.full_name}! 👋")
         
-        # Show data summary
+        # Show data summary with pending bookings
         st.markdown("---")
         st.markdown("### 📈 Your Data Summary")
         st.write(f"🚗 Cars: {len(cars)}")
         st.write(f"📅 Bookings: {len(bookings)}")
         st.write(f"💰 Expenses: {len(expenses)}")
+        if user_pending:
+            st.write(f"⏳ Pending Requests: {len(user_pending)}")
         
+        # Public booking link
+        st.markdown("---")
+        st.markdown("### 🌐 Public Booking")
+        public_url = "Add ?page=booking to your URL"
+        st.code(public_url)
+        st.caption("Share this URL with customers for self-service booking")
+        
+        # ---------- Logout ----------
+        if st.button("🚪 Logout"):
+            # Clear user session but keep persistent data
+            keys_to_remove = ['logged_in', 'username', 'full_name', 'current_user', 'cars', 'bookings', 'expenses']
+            for key in keys_to_remove:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.rerun()
+        
+        st.markdown("---")
+        menu = st.radio("Navigation", ["📊 Dashboard", "🚗 Cars", "📅 Bookings", "💰 Expenses", "🔧 Maintenance"])
+        
+        # Add data management section
+        show_data_management_section()
+
+    # ---------- Enhanced Dashboard ----------
+    if menu == "📊 Dashboard":
+        st.markdown("# 📊 Business Dashboard")
+        
+        # Key Metrics
+        total_income = 0
+        total_expenses = 0
+        
+        if not bookings.empty and "amount_paid" in bookings.columns:
+            total_income = pd.to_numeric(bookings["amount_paid"], errors='coerce').fillna(0).sum()
+        
+        if not expenses.empty and "amount" in expenses.columns:
+            total_expenses = pd.to_numeric(expenses["amount"], errors='coerce').fillna(0).sum()
+        
+        profit = total_income - total_expenses
+        
+        # Metrics Row
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("💰 Total Income", f"UGX {total_income:,.0f}")
+        with col2:
+            st.metric("🧾 Total Expenses", f"UGX {total_expenses:,.0f}")
+        with col3:
+            st.metric("📊 Net Profit", f"UGX {profit:,.0f}", delta=f"{((profit/total_income)*100) if total_income > 0 else 0:.1f}%")
+        with col4:
+            st.metric("🚗 Total Cars", len(cars))
+
+        # Charts Row
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### 📈 Monthly Income Trend")
+            if not bookings.empty:
+                bookings_copy = bookings.copy()
+                bookings_copy['start_date'] = pd.to_datetime(bookings_copy['start_date'])
+                bookings_copy['month'] = bookings_copy['start_date'].dt.to_period('M').astype(str)
+                monthly_income = bookings_copy.groupby('month')['amount_paid'].sum().reset_index()
+                
+                fig = px.line(monthly_income, x='month', y='amount_paid', 
+                             title="Monthly Income", markers=True)
+                fig.update_layout(height=300)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No booking data available")
+
+        with col2:
+            st.markdown("### 🥧 Expense Breakdown")
+            if not expenses.empty:
+                expense_by_type = expenses.groupby('type')['amount'].sum().reset_index()
+                fig = px.pie(expense_by_type, values='amount', names='type', 
+                           title="Expenses by Type")
+                fig.update_layout(height=300)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No expense data available")
+
+        # Status Overview with Quick Actions
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### 🚗 Car Status Overview")
+            if not cars.empty:
+                status_counts = cars['status'].value_counts()
+                fig = px.bar(x=status_counts.index, y=status_counts.values, 
+                           title="Cars by Status", color=status_counts.index)
+                fig.update_layout(height=300)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No cars registered")
+
+        with col2:
+            st.markdown("### ⚡ Quick Actions")
+            active_bookings = bookings[bookings['status'] == 'Booked'] if not bookings.empty else pd.DataFrame()
+            
+            if not active_bookings.empty:
+                st.markdown("**Complete Bookings:**")
+                for _, booking in active_bookings.iterrows():
+                    col_a, col_b = st.columns([3, 1])
+                    with col_a:
+                        st.write(f"📅 {booking['client_name']} - {booking['start_date']}")
+                    with col_b:
+                        if st.button("✅", key=f"complete_{booking['id']}", help="Complete booking"):
+                            if complete_booking(booking['id'], user_prefix):
+                                st.success("Booking completed!")
+                                st.rerun()
+            else:
+                st.info("No active bookings")
+
+    # ---------- Enhanced Cars Section ----------
+    elif menu == "🚗 Cars":
+        st.markdown("# 🚗 Car Management")
+        
+        # Edit Mode Toggle
+        edit_mode = st.toggle("✏️ Edit Mode", key="car_edit_mode")
+        
+        if not cars.empty:
+            if edit_mode:
+                st.markdown("### Edit Car Details")
+                selected_car_id = st.selectbox("Select Car to Edit", 
+                                             cars['id'].values,
+                                             format_func=lambda x: f"{cars[cars['id']==x].iloc[0]['car_name']} ({cars[cars['id']==x].iloc[0]['plate_number']})")
+                
+                if selected_car_id:
+                    car_data = cars[cars['id'] == selected_car_id].iloc[0]
+                    
+                    with st.form("edit_car"):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            new_name = st.text_input("Car Name", value=car_data['car_name'])
+                        with col2:
+                            new_plate = st.text_input("Plate Number", value=car_data['plate_number'])
+                        with col3:
+                            new_model = st.text_input("Model", value=car_data['model'])
+                        
+                        new_status = st.selectbox("Status", ["Available", "Booked", "Maintenance"], 
+                                                index=["Available", "Booked", "Maintenance"].index(car_data['status']))
+                        
+                        if st.form_submit_button("💾 Update Car"):
+                            if new_name and new_plate and new_model:
+                                st.session_state.cars.loc[st.session_state.cars['id'] == selected_car_id, 'car_name'] = new_name
+                                st.session_state.cars.loc[st.session_state.cars['id'] == selected_car_id, 'plate_number'] = new_plate
+                                st.session_state.cars.loc[st.session_state.cars['id'] == selected_car_id, 'model'] = new_model
+                                st.session_state.cars.loc[st.session_state.cars['id'] == selected_car_id, 'status'] = new_status
+                                save_data(st.session_state.cars, "cars.csv", user_prefix)
+                                st.success("✅ Car updated and saved!")
+                                st.rerun()
+            
+            st.markdown("### Current Fleet")
+            st.dataframe(cars, use_container_width=True)
+        else:
+            st.info("No cars registered yet. Add your first car below!")
+
+        # Add new car form with enhanced feedback
+        with st.form("add_car"):
+            st.markdown("#### ➕ Add New Car")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                name = st.text_input("Car Name")
+            with col2:
+                plate = st.text_input("Plate Number")
+            with col3:
+                model = st.text_input("Model")
+            
+            if st.form_submit_button("Add Car"):
+                if name and plate and model:
+                    # Generate proper ID
+                    new_id = 1 if cars.empty else int(cars['id'].max()) + 1
+                    
+                    new_car = {
+                        "id": new_id, 
+                        "car_name": name, 
+                        "plate_number": plate, 
+                        "model": model,
+                        "status": "Available", 
+                        "last_service_date": dt.date.today().strftime("%Y-%m-%d"), 
+                        "next_service_date": ""
+                    }
+                    
+                    # Update session state
+                    st.session_state.cars = pd.concat([cars, pd.DataFrame([new_car])], ignore_index=True)
+                    
+                    # Save to persistent storage
+                    save_data(st.session_state.cars, "cars.csv", user_prefix)
+                    
+                    st.success(f"✅ Car '{name}' added successfully and saved to your account!")
+                    st.rerun()
+                else:
+                    st.error("Please fill in all fields.")
+
+    # ---------- Enhanced Bookings Section ----------
+    elif menu == "📅 Bookings":
+        st.markdown("# 📅 Booking Management")
+        
+        if cars.empty:
+            st.warning("Please add cars first before creating bookings.")
+        else:
+            # Edit Mode Toggle
+            edit_mode = st.toggle("✏️ Edit Mode", key="booking_edit_mode")
+            
+            if not bookings.empty:
+                if edit_mode:
+                    st.markdown("### Edit Booking")
+                    selected_booking_id = st.selectbox("Select Booking to Edit", 
+                                                     bookings['id'].values,
+                                                     format_func=lambda x: f"{bookings[bookings['id']==x].iloc[0]['client_name']} - {bookings[bookings['id']==x].iloc[0]['start_date']}")
+                    
+                    if selected_booking_id:
+                        booking_data = bookings[bookings['id'] == selected_booking_id].iloc[0]
+                        
+                        with st.form("edit_booking"):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                new_client = st.text_input("Client Name", value=booking_data['client_name'])
+                                new_start = st.date_input("Start Date", value=pd.to_datetime(booking_data['start_date']).date())
+                                new_amount = st.number_input("Amount", value=float(booking_data['amount_paid']))
+                            with col2:
+                                new_end = st.date_input("End Date", value=pd.to_datetime(booking_data['end_date']).date())
+                                new_status = st.selectbox("Status", ["Booked", "Completed", "Cancelled"], 
+                                                        index=["Booked", "Completed", "Cancelled"].index(booking_data['status']))
+                            
+                            # Check for date conflicts when editing
+                            if new_start and new_end:
+                                has_conflict, conflicts = check_date_overlap(booking_data['car_id'], new_start, new_end, selected_booking_id)
+                                if has_conflict:
+                                    st.warning("⚠️ Date conflict detected with existing bookings:")
+                                    for conflict in conflicts:
+                                        st.write(f"• {conflict['client']} ({conflict['start']} to {conflict['end']})")
+                            
+                            if st.form_submit_button("💾 Update Booking"):
+                                if new_client and new_amount > 0 and new_start and new_end:
+                                    # Check conflicts again before saving
+                                    has_conflict, conflicts = check_date_overlap(booking_data['car_id'], new_start, new_end, selected_booking_id)
+                                    
+                                    if has_conflict and new_status == "Booked":
+                                        st.error("Cannot update booking due to date conflicts with existing bookings.")
+                                    else:
+                                        st.session_state.bookings.loc[st.session_state.bookings['id'] == selected_booking_id, 'client_name'] = new_client
+                                        st.session_state.bookings.loc[st.session_state.bookings['id'] == selected_booking_id, 'start_date'] = new_start.strftime("%Y-%m-%d")
+                                        st.session_state.bookings.loc[st.session_state.bookings['id'] == selected_booking_id, 'end_date'] = new_end.strftime("%Y-%m-%d")
+                                        st.session_state.bookings.loc[st.session_state.bookings['id'] == selected_booking_id, 'amount_paid'] = new_amount
+                                        st.session_state.bookings.loc[st.session_state.bookings['id'] == selected_booking_id, 'status'] = new_status
+                                        save_data(st.session_state.bookings, "bookings.csv", user_prefix)
+                                        st.success("Booking updated successfully!")
+                                        st.rerun()
+                                else:
+                                    st.error("Please fill in all fields correctly.")
+                
+                st.markdown("### Current Bookings")
+                # Enhanced booking display with status and conflict info
+                display_bookings = bookings.copy()
+                if not display_bookings.empty:
+                    # Add car names to booking display
+                    display_bookings = display_bookings.merge(
+                        cars[['id', 'car_name']], 
+                        left_on='car_id', 
+                        right_on='id', 
+                        suffixes=('', '_car')
+                    ).drop('id_car', axis=1)
+                    
+                st.dataframe(display_bookings, use_container_width=True)
+            
+            # Enhanced booking form with availability check
+            with st.form("add_booking"):
+                st.markdown("#### ➕ New Booking")
+                
+                # Show all cars, not just available ones
+                if cars.empty:
+                    st.warning("No cars available for booking.")
+                    car_id = None
+                else:
+                    car_display = cars.apply(lambda x: f"{x['car_name']} ({x['plate_number']})", axis=1)
+                    selected_idx = st.selectbox("Select Car", range(len(cars)), 
+                                               format_func=lambda x: car_display.iloc[x])
+                    car_id = cars.iloc[selected_idx]["id"] if selected_idx is not None else None
+                    
+                    # Show car availability status
+                    if car_id:
+                        status, active_bookings = get_car_availability_status(car_id)
+                        if status == "Available":
+                            st.success("✅ Car is fully available")
+                        elif status == "Partially Booked":
+                            st.info("ℹ️ Car has existing bookings:")
+                            for booking in active_bookings:
+                                st.write(f"• {booking['client']} ({booking['start']} to {booking['end']})")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    client = st.text_input("Client Name")
+                    start = st.date_input("Start Date", min_value=dt.date.today())
+                with col2:
+                    amount = st.number_input("Amount Paid (UGX)", min_value=0)
+                    end = st.date_input("End Date", min_value=dt.date.today())
+                
+                # Real-time conflict checking
+                if car_id and start and end and start <= end:
+                    has_conflict, conflicts = check_date_overlap(car_id, start, end)
+                    if has_conflict:
+                        st.warning("⚠️ Date conflict detected with existing bookings:")
+                        for conflict in conflicts:
+                            st.write(f"• {conflict['client']} ({conflict['start']} to {conflict['end']})")
+                        st.info("💡 Consider choosing different dates or proceed if this is intentional (rebooking)")
+                
+                allow_conflicts = st.checkbox("Allow overlapping bookings (for rebooking)", 
+                                            help="Check this to allow booking even when dates overlap with existing bookings")
+                
+                if st.form_submit_button("Add Booking"):
+                    if car_id and client and start and end and amount > 0:
+                        # Check for conflicts
+                        has_conflict, conflicts = check_date_overlap(car_id, start, end)
+                        
+                        if has_conflict and not allow_conflicts:
+                            st.error("Cannot create booking due to date conflicts. Enable 'Allow overlapping bookings' if this is intentional.")
+                        else:
+                            new_booking = {
+                                "id": len(bookings)+1, "car_id": car_id, "client_name": client,
+                                "start_date": start.strftime("%Y-%m-%d"), "end_date": end.strftime("%Y-%m-%d"), 
+                                "amount_paid": amount, "status": "Booked"
+                            }
+                            st.session_state.bookings = pd.concat([bookings, pd.DataFrame([new_booking])], ignore_index=True)
+                            
+                            # Update car status to "Booked" if not already
+                            current_car = cars[cars['id'] == car_id].iloc[0]
+                            if current_car['status'] != "Booked":
+                                update_car_status(car_id, "Booked", user_prefix)
+                            
+                            save_data(st.session_state.bookings, "bookings.csv", user_prefix)
+                            
+                            if has_conflict:
+                                st.success("Booking added successfully! ⚠️ Note: This booking overlaps with existing bookings.")
+                            else:
+                                st.success("Booking added successfully!")
+                            st.rerun()
+                    else:
+                        st.error("Please fill in all fields correctly.")
+
+    # ---------- Enhanced Expenses Section ----------
+    elif menu == "💰 Expenses":
+        st.markdown("# 💰 Expense Management")
+        
+        if cars.empty:
+            st.warning("Please add cars first before recording expenses.")
+        else:
+            # Edit Mode Toggle
+            edit_mode = st.toggle("✏️ Edit Mode", key="expense_edit_mode")
+            
+            if not expenses.empty:
+                if edit_mode:
+                    st.markdown("### Edit Expense")
+                    selected_expense_id = st.selectbox("Select Expense to Edit", 
+                                                     expenses['id'].values,
+                                                     format_func=lambda x: f"{expenses[expenses['id']==x].iloc[0]['description']} - UGX {expenses[expenses['id']==x].iloc[0]['amount']}")
+                    
+                    if selected_expense_id:
+                        expense_data = expenses[expenses['id'] == selected_expense_id].iloc[0]
+                        
+                        with st.form("edit_expense"):
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                new_desc = st.text_input("Description", value=expense_data['description'])
+                            with col2:
+                                new_amount = st.number_input("Amount", value=float(expense_data['amount']))
+                            with col3:
+                                new_type = st.selectbox("Type", ["Fuel", "Maintenance", "Insurance", "Repairs", "Other"],
+                                                       index=["Fuel", "Maintenance", "Insurance", "Repairs", "Other"].index(expense_data['type']))
+                            
+                            if st.form_submit_button("💾 Update Expense"):
+                                if new_desc and new_amount > 0:
+                                    st.session_state.expenses.loc[st.session_state.expenses['id'] == selected_expense_id, 'description'] = new_desc
+                                    st.session_state.expenses.loc[st.session_state.expenses['id'] == selected_expense_id, 'amount'] = new_amount
+                                    st.session_state.expenses.loc[st.session_state.expenses['id'] == selected_expense_id, 'type'] = new_type
+                                    save_data(st.session_state.expenses, "expenses.csv", user_prefix)
+                                    st.success("Expense updated successfully!")
+                                    st.rerun()
+                
+                st.markdown("### Expense History")
+                st.dataframe(expenses, use_container_width=True)
+            
+            # Add new expense form (unchanged from previous version)
+            with st.form("add_expense"):
+                st.markdown("#### ➕ Record Expense")
+                car_display = cars.apply(lambda x: f"{x['car_name']} ({x['plate_number']})", axis=1)
+                selected_idx = st.selectbox("Select Car", range(len(cars)), 
+                                           format_func=lambda x: car_display.iloc[x])
+                car_id = cars.iloc[selected_idx]["id"] if selected_idx is not None else None
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    desc = st.text_input("Description")
+                with col2:
+                    amt = st.number_input("Amount (UGX)", min_value=0)
+                with col3:
+                    etype = st.selectbox("Type", ["Fuel", "Maintenance", "Insurance", "Repairs", "Other"])
+                
+                if st.form_submit_button("Add Expense"):
+                    if car_id and desc and amt > 0:
+                        new_exp = {
+                            "id": len(expenses)+1, "car_id": car_id, "date": dt.date.today().strftime("%Y-%m-%d"), 
+                            "description": desc, "amount": amt, "type": etype
+                        }
+                        st.session_state.expenses = pd.concat([expenses, pd.DataFrame([new_exp])], ignore_index=True)
+                        save_data(st.session_state.expenses, "expenses.csv", user_prefix)
+                        st.success("Expense recorded successfully!")
+                        st.rerun()
+                    else:
+                        st.error("Please fill in all fields correctly.")
+
+    # ---------- Maintenance Section (unchanged) ----------
+    elif menu == "🔧 Maintenance":
+        st.markdown("# 🔧 Maintenance Schedule")
+        if not cars.empty:
+            maintenance_data = cars[["car_name", "last_service_date", "next_service_date", "status"]]
+            st.dataframe(maintenance_data, use_container_width=True)
+        else:
+            st.info("No cars registered yet.")
+
+# ---------- Public Booking Functions ----------
+def save_public_booking(booking_data):
+    """Save public booking to pending bookings"""
+    if 'pending_bookings' not in st.session_state:
+        st.session_state.pending_bookings = []
+    
+    booking_data['id'] = len(st.session_state.pending_bookings) + 1
+    booking_data['submission_date'] = dt.datetime.now().isoformat()
+    booking_data['status'] = 'Pending'
+    
+    st.session_state.pending_bookings.append(booking_data)
+    
+    # Also save to persistent storage
+    save_to_persistent_storage('pending_bookings', None, pd.DataFrame(st.session_state.pending_bookings))
+
+def load_pending_bookings():
+    """Load pending bookings from storage"""
+    if 'pending_bookings' not in st.session_state:
+        pending_df = load_from_persistent_storage('pending_bookings', None, 
+                                                 ["id", "owner", "car_id", "car_name", "client_name", "client_phone", 
+                                                  "client_email", "start_date", "end_date", "purpose", "submission_date", "status"])
+        st.session_state.pending_bookings = pending_df.to_dict('records') if not pending_df.empty else []
+    return st.session_state.pending_bookings
+
+def get_all_available_cars():
+    """Get all cars from all users for public booking"""
+    all_cars = []
+    if 'persistent_data' in st.session_state:
+        for key, data in st.session_state.persistent_data.get('cars', {}).items():
+            if isinstance(data, list) and data:
+                owner = key.split('_')[0] if '_' in key else 'Unknown'
+                for car in data:
+                    car_copy = car.copy()
+                    car_copy['owner'] = owner
+                    all_cars.append(car_copy)
+    return pd.DataFrame(all_cars)
+
+# ---------- Public Booking Page ----------
+def show_public_booking():
+    st.markdown("# 🚗 Car Rental Booking")
+    st.markdown("### Book your perfect car rental")
+    
+    # Get all available cars
+    all_cars = get_all_available_cars()
+    
+    if all_cars.empty:
+        st.error("No cars available for booking at the moment. Please try again later.")
+        return
+    
+    available_cars = all_cars[all_cars['status'] == 'Available']
+    
+    if available_cars.empty:
+        st.warning("All cars are currently booked. Please check back later or contact us directly.")
+        st.markdown("### All Cars (Check availability)")
+        st.dataframe(all_cars[['car_name', 'model', 'plate_number', 'status', 'owner']], use_container_width=True)
+        return
+    
+    # Show available cars
+    st.markdown("### Available Cars")
+    display_cars = available_cars[['car_name', 'model', 'plate_number', 'owner']].copy()
+    st.dataframe(display_cars, use_container_width=True)
+    
+    # Booking form
+    with st.form("public_booking"):
+        st.markdown("#### 📝 Booking Details")
+        
+        # Car selection
+        car_options = available_cars.apply(lambda x: f"{x['car_name']} - {x['model']} (Owner: {x['owner']})", axis=1)
+        selected_car_idx = st.selectbox("Select Car", range(len(available_cars)), 
+                                       format_func=lambda x: car_options.iloc[x])
+        
+        selected_car = available_cars.iloc[selected_car_idx] if selected_car_idx is not None else None
+        
+        # Customer details
+        col1, col2 = st.columns(2)
+        with col1:
+            client_name = st.text_input("Your Full Name *", placeholder="John Doe")
+            client_phone = st.text_input("Phone Number *", placeholder="+256 XXX XXX XXX")
+            start_date = st.date_input("Start Date *", min_value=dt.date.today())
+        
+        with col2:
+            client_email = st.text_input("Email Address", placeholder="john@example.com")
+            purpose = st.text_input("Purpose of Rental", placeholder="Business trip, vacation, etc.")
+            end_date = st.date_input("End Date *", min_value=dt.date.today())
+        
+        # Additional info
+        additional_notes = st.text_area("Additional Notes", placeholder="Any special requirements or questions...")
+        
+        # Terms and conditions
+        agree_terms = st.checkbox("I agree to the terms and conditions *")
+        
+        if st.form_submit_button("🚀 Submit Booking Request", type="primary"):
+            if not all([client_name, client_phone, start_date, end_date, agree_terms]):
+                st.error("Please fill in all required fields (*) and agree to terms.")
+            elif end_date < start_date:
+                st.error("End date must be after start date.")
+            elif selected_car is None:
+                st.error("Please select a car.")
+            else:
+                # Create booking request
+                booking_request = {
+                    'owner': selected_car['owner'],
+                    'car_id': selected_car['id'],
+                    'car_name': selected_car['car_name'],
+                    'car_model': selected_car['model'],
+                    'plate_number': selected_car['plate_number'],
+                    'client_name': client_name,
+                    'client_phone': client_phone,
+                    'client_email': client_email,
+                    'start_date': start_date.strftime('%Y-%m-%d'),
+                    'end_date': end_date.strftime('%Y-%m-%d'),
+                    'purpose': purpose,
+                    'additional_notes': additional_notes
+                }
+                
+                save_public_booking(booking_request)
+                
+                st.success("🎉 Booking request submitted successfully!")
+                st.info("Your booking request has been sent to the car owner. You will be contacted soon for confirmation.")
+                
+                # Show booking summary
+                st.markdown("#### 📋 Booking Summary")
+                st.write(f"**Car:** {selected_car['car_name']} - {selected_car['model']}")
+                st.write(f"**Owner:** {selected_car['owner']}")
+                st.write(f"**Dates:** {start_date} to {end_date}")
+                st.write(f"**Duration:** {(end_date - start_date).days + 1} days")
+                st.write(f"**Customer:** {client_name}")
+                st.write(f"**Phone:** {client_phone}")
+                
+                if st.button("Submit Another Booking"):
+                    st.rerun()
+
+# ---------- Modified Main App with Pending Bookings ----------
+def main_app():
+    # Initialize user-specific data with persistent storage priority
+    user_prefix = st.session_state.username
+    
+    # Always reload data to ensure persistence works
+    if 'current_user' not in st.session_state or st.session_state.get('current_user') != user_prefix:
+        # Clear any cached data first
+        st.cache_data.clear()
+        
+        # Load user-specific data
+        st.session_state.cars = load_data("cars.csv", ["id", "car_name", "plate_number", "model", "status", "last_service_date", "next_service_date"], user_prefix)
+        st.session_state.bookings = load_data("bookings.csv", ["id", "car_id", "client_name", "start_date", "end_date", "amount_paid", "status"], user_prefix)
+        st.session_state.expenses = load_data("expenses.csv", ["id", "car_id", "date", "description", "amount", "type"], user_prefix)
+        st.session_state.current_user = user_prefix
+
+    cars = st.session_state.cars
+    bookings = st.session_state.bookings
+    expenses = st.session_state.expenses
+
+    # Load pending bookings
+    pending_bookings = load_pending_bookings()
+    user_pending = [b for b in pending_bookings if b.get('owner') == user_prefix and b.get('status') == 'Pending']
+
+    # ---------- Enhanced Sidebar ----------
+    with st.sidebar:
+        st.markdown(f"### Welcome, {st.session_state.full_name}! 👋")
+        
+        # Show data summary with pending bookings
+        st.markdown("---")
+        st.markdown("### 📈 Your Data Summary")
+        st.write(f"🚗 Cars: {len(cars)}")
+        st.write(f"📅 Bookings: {len(bookings)}")
+        st.write(f"💰 Expenses: {len(expenses)}")
+        if user_pending:
+            st.write(f"⏳ Pending Requests: {len(user_pending)}")
+        
+        # Public booking link
+        st.markdown("---")
+        st.markdown("### 🌐 Public Booking")
+        public_url = "Add ?page=booking to your URL"
+        st.code(public_url)
+        st.caption("Share this URL with customers for self-service booking")
+        
+        # ---------- Logout ----------
         if st.button("🚪 Logout"):
             # Clear user session but keep persistent data
             keys_to_remove = ['logged_in', 'username', 'full_name', 'current_user', 'cars', 'bookings', 'expenses']
@@ -791,10 +1391,15 @@ def show_data_management_section():
             st.sidebar.error(f"❌ Import failed: {str(e)}")
 
 # ---------- App Entry Point ----------
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-
-if st.session_state.logged_in:
-    main_app()
+# Check for public booking page
+query_params = st.query_params
+if query_params.get("page") == "booking":
+    show_public_booking()
 else:
-    show_login()
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = False
+
+    if st.session_state.logged_in:
+        main_app()
+    else:
+        show_login()
