@@ -99,8 +99,69 @@ def update_car_status(car_id, new_status, user_prefix):
     st.session_state.cars = cars
     save_data(cars, "cars.csv", user_prefix)
 
+def check_date_overlap(car_id, start_date, end_date, exclude_booking_id=None):
+    """Check if booking dates overlap with existing bookings for the same car"""
+    bookings = st.session_state.bookings
+    car_bookings = bookings[bookings["car_id"] == car_id]
+    
+    # Exclude current booking if editing
+    if exclude_booking_id:
+        car_bookings = car_bookings[car_bookings["id"] != exclude_booking_id]
+    
+    # Only check active bookings (not completed or cancelled)
+    active_bookings = car_bookings[car_bookings["status"] == "Booked"]
+    
+    if active_bookings.empty:
+        return False, []
+    
+    start_date = pd.to_datetime(start_date)
+    end_date = pd.to_datetime(end_date)
+    
+    overlapping_bookings = []
+    
+    for _, booking in active_bookings.iterrows():
+        booking_start = pd.to_datetime(booking['start_date'])
+        booking_end = pd.to_datetime(booking['end_date'])
+        
+        # Check for overlap
+        if (start_date <= booking_end) and (end_date >= booking_start):
+            overlapping_bookings.append({
+                'client': booking['client_name'],
+                'start': booking['start_date'],
+                'end': booking['end_date']
+            })
+    
+    return len(overlapping_bookings) > 0, overlapping_bookings
+
+def get_car_availability_status(car_id):
+    """Get detailed availability status for a car"""
+    bookings = st.session_state.bookings
+    car_bookings = bookings[(bookings["car_id"] == car_id) & (bookings["status"] == "Booked")]
+    
+    if car_bookings.empty:
+        return "Available", []
+    
+    current_date = pd.to_datetime(dt.date.today())
+    active_bookings = []
+    
+    for _, booking in car_bookings.iterrows():
+        booking_start = pd.to_datetime(booking['start_date'])
+        booking_end = pd.to_datetime(booking['end_date'])
+        
+        if booking_end >= current_date:  # Future or ongoing bookings
+            active_bookings.append({
+                'client': booking['client_name'],
+                'start': booking['start_date'],
+                'end': booking['end_date']
+            })
+    
+    if active_bookings:
+        return "Partially Booked", active_bookings
+    else:
+        return "Available", []
+
 def complete_booking(booking_id, user_prefix):
-    """Mark booking as completed and make car available"""
+    """Mark booking as completed and update car status if no other active bookings"""
     bookings = st.session_state.bookings.copy()
     booking_row = bookings[bookings["id"] == booking_id]
     if not booking_row.empty:
@@ -108,7 +169,17 @@ def complete_booking(booking_id, user_prefix):
         bookings.loc[bookings["id"] == booking_id, "status"] = "Completed"
         st.session_state.bookings = bookings
         save_data(bookings, "bookings.csv", user_prefix)
-        update_car_status(car_id, "Available", user_prefix)
+        
+        # Check if car has other active bookings
+        other_active_bookings = bookings[
+            (bookings["car_id"] == car_id) & 
+            (bookings["status"] == "Booked") & 
+            (bookings["id"] != booking_id)
+        ]
+        
+        if other_active_bookings.empty:
+            update_car_status(car_id, "Available", user_prefix)
+        
         return True
     return False
 
@@ -363,57 +434,125 @@ def main_app():
                             col1, col2 = st.columns(2)
                             with col1:
                                 new_client = st.text_input("Client Name", value=booking_data['client_name'])
+                                new_start = st.date_input("Start Date", value=pd.to_datetime(booking_data['start_date']).date())
                                 new_amount = st.number_input("Amount", value=float(booking_data['amount_paid']))
                             with col2:
+                                new_end = st.date_input("End Date", value=pd.to_datetime(booking_data['end_date']).date())
                                 new_status = st.selectbox("Status", ["Booked", "Completed", "Cancelled"], 
                                                         index=["Booked", "Completed", "Cancelled"].index(booking_data['status']))
                             
+                            # Check for date conflicts when editing
+                            if new_start and new_end:
+                                has_conflict, conflicts = check_date_overlap(booking_data['car_id'], new_start, new_end, selected_booking_id)
+                                if has_conflict:
+                                    st.warning("⚠️ Date conflict detected with existing bookings:")
+                                    for conflict in conflicts:
+                                        st.write(f"• {conflict['client']} ({conflict['start']} to {conflict['end']})")
+                            
                             if st.form_submit_button("💾 Update Booking"):
-                                if new_client and new_amount > 0:
-                                    st.session_state.bookings.loc[st.session_state.bookings['id'] == selected_booking_id, 'client_name'] = new_client
-                                    st.session_state.bookings.loc[st.session_state.bookings['id'] == selected_booking_id, 'amount_paid'] = new_amount
-                                    st.session_state.bookings.loc[st.session_state.bookings['id'] == selected_booking_id, 'status'] = new_status
-                                    save_data(st.session_state.bookings, "bookings.csv", user_prefix)
-                                    st.success("Booking updated successfully!")
-                                    st.rerun()
+                                if new_client and new_amount > 0 and new_start and new_end:
+                                    # Check conflicts again before saving
+                                    has_conflict, conflicts = check_date_overlap(booking_data['car_id'], new_start, new_end, selected_booking_id)
+                                    
+                                    if has_conflict and new_status == "Booked":
+                                        st.error("Cannot update booking due to date conflicts with existing bookings.")
+                                    else:
+                                        st.session_state.bookings.loc[st.session_state.bookings['id'] == selected_booking_id, 'client_name'] = new_client
+                                        st.session_state.bookings.loc[st.session_state.bookings['id'] == selected_booking_id, 'start_date'] = new_start.strftime("%Y-%m-%d")
+                                        st.session_state.bookings.loc[st.session_state.bookings['id'] == selected_booking_id, 'end_date'] = new_end.strftime("%Y-%m-%d")
+                                        st.session_state.bookings.loc[st.session_state.bookings['id'] == selected_booking_id, 'amount_paid'] = new_amount
+                                        st.session_state.bookings.loc[st.session_state.bookings['id'] == selected_booking_id, 'status'] = new_status
+                                        save_data(st.session_state.bookings, "bookings.csv", user_prefix)
+                                        st.success("Booking updated successfully!")
+                                        st.rerun()
+                                else:
+                                    st.error("Please fill in all fields correctly.")
                 
                 st.markdown("### Current Bookings")
-                st.dataframe(bookings, use_container_width=True)
+                # Enhanced booking display with status and conflict info
+                display_bookings = bookings.copy()
+                if not display_bookings.empty:
+                    # Add car names to booking display
+                    display_bookings = display_bookings.merge(
+                        cars[['id', 'car_name']], 
+                        left_on='car_id', 
+                        right_on='id', 
+                        suffixes=('', '_car')
+                    ).drop('id_car', axis=1)
+                    
+                st.dataframe(display_bookings, use_container_width=True)
             
-            # Add new booking form (unchanged from previous version)
+            # Enhanced booking form with availability check
             with st.form("add_booking"):
                 st.markdown("#### ➕ New Booking")
-                available_cars = cars[cars["status"] == "Available"]
                 
-                if available_cars.empty:
-                    st.warning("No available cars for booking.")
+                # Show all cars, not just available ones
+                if cars.empty:
+                    st.warning("No cars available for booking.")
                     car_id = None
                 else:
-                    car_display = available_cars.apply(lambda x: f"{x['car_name']} ({x['plate_number']})", axis=1)
-                    selected_idx = st.selectbox("Select Car", range(len(available_cars)), 
+                    car_display = cars.apply(lambda x: f"{x['car_name']} ({x['plate_number']})", axis=1)
+                    selected_idx = st.selectbox("Select Car", range(len(cars)), 
                                                format_func=lambda x: car_display.iloc[x])
-                    car_id = available_cars.iloc[selected_idx]["id"] if selected_idx is not None else None
+                    car_id = cars.iloc[selected_idx]["id"] if selected_idx is not None else None
+                    
+                    # Show car availability status
+                    if car_id:
+                        status, active_bookings = get_car_availability_status(car_id)
+                        if status == "Available":
+                            st.success("✅ Car is fully available")
+                        elif status == "Partially Booked":
+                            st.info("ℹ️ Car has existing bookings:")
+                            for booking in active_bookings:
+                                st.write(f"• {booking['client']} ({booking['start']} to {booking['end']})")
                 
                 col1, col2 = st.columns(2)
                 with col1:
                     client = st.text_input("Client Name")
-                    start = st.date_input("Start Date")
+                    start = st.date_input("Start Date", min_value=dt.date.today())
                 with col2:
                     amount = st.number_input("Amount Paid (UGX)", min_value=0)
-                    end = st.date_input("End Date")
+                    end = st.date_input("End Date", min_value=dt.date.today())
+                
+                # Real-time conflict checking
+                if car_id and start and end and start <= end:
+                    has_conflict, conflicts = check_date_overlap(car_id, start, end)
+                    if has_conflict:
+                        st.warning("⚠️ Date conflict detected with existing bookings:")
+                        for conflict in conflicts:
+                            st.write(f"• {conflict['client']} ({conflict['start']} to {conflict['end']})")
+                        st.info("💡 Consider choosing different dates or proceed if this is intentional (rebooking)")
+                
+                allow_conflicts = st.checkbox("Allow overlapping bookings (for rebooking)", 
+                                            help="Check this to allow booking even when dates overlap with existing bookings")
                 
                 if st.form_submit_button("Add Booking"):
                     if car_id and client and start and end and amount > 0:
-                        new_booking = {
-                            "id": len(bookings)+1, "car_id": car_id, "client_name": client,
-                            "start_date": start.strftime("%Y-%m-%d"), "end_date": end.strftime("%Y-%m-%d"), 
-                            "amount_paid": amount, "status": "Booked"
-                        }
-                        st.session_state.bookings = pd.concat([bookings, pd.DataFrame([new_booking])], ignore_index=True)
-                        update_car_status(car_id, "Booked", user_prefix)
-                        save_data(st.session_state.bookings, "bookings.csv", user_prefix)
-                        st.success("Booking added successfully!")
-                        st.rerun()
+                        # Check for conflicts
+                        has_conflict, conflicts = check_date_overlap(car_id, start, end)
+                        
+                        if has_conflict and not allow_conflicts:
+                            st.error("Cannot create booking due to date conflicts. Enable 'Allow overlapping bookings' if this is intentional.")
+                        else:
+                            new_booking = {
+                                "id": len(bookings)+1, "car_id": car_id, "client_name": client,
+                                "start_date": start.strftime("%Y-%m-%d"), "end_date": end.strftime("%Y-%m-%d"), 
+                                "amount_paid": amount, "status": "Booked"
+                            }
+                            st.session_state.bookings = pd.concat([bookings, pd.DataFrame([new_booking])], ignore_index=True)
+                            
+                            # Update car status to "Booked" if not already
+                            current_car = cars[cars['id'] == car_id].iloc[0]
+                            if current_car['status'] != "Booked":
+                                update_car_status(car_id, "Booked", user_prefix)
+                            
+                            save_data(st.session_state.bookings, "bookings.csv", user_prefix)
+                            
+                            if has_conflict:
+                                st.success("Booking added successfully! ⚠️ Note: This booking overlaps with existing bookings.")
+                            else:
+                                st.success("Booking added successfully!")
+                            st.rerun()
                     else:
                         st.error("Please fill in all fields correctly.")
 
