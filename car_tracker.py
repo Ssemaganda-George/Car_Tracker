@@ -974,6 +974,35 @@ def show_public_booking():
     display_cars = available_cars[['car_name', 'model', 'plate_number']].copy()
     st.dataframe(display_cars, use_container_width=True)
     
+    # Initialize session state for form reset
+    if 'booking_submitted' not in st.session_state:
+        st.session_state.booking_submitted = False
+    
+    # Show success message if booking was just submitted
+    if st.session_state.booking_submitted:
+        st.success("🎉 Booking request submitted successfully!")
+        st.info(f"Your booking request has been sent to {owner_name}. You will be contacted soon for confirmation.")
+        
+        # Show booking summary from session state
+        if 'last_booking_summary' in st.session_state:
+            summary = st.session_state.last_booking_summary
+            st.markdown("#### 📋 Booking Summary")
+            st.write(f"**Car:** {summary['car_name']} - {summary['car_model']}")
+            st.write(f"**Owner:** {summary['owner_name']}")
+            st.write(f"**Dates:** {summary['start_date']} to {summary['end_date']}")
+            st.write(f"**Duration:** {summary['duration']} days")
+            st.write(f"**Customer:** {summary['client_name']}")
+            st.write(f"**Phone:** {summary['client_phone']}")
+        
+        # Reset button outside the form
+        if st.button("📝 Submit Another Booking", type="primary"):
+            st.session_state.booking_submitted = False
+            if 'last_booking_summary' in st.session_state:
+                del st.session_state.last_booking_summary
+            st.rerun()
+        
+        return
+    
     # Booking form
     with st.form("public_booking"):
         st.markdown("#### 📝 Booking Details")
@@ -1036,20 +1065,21 @@ def show_public_booking():
                 
                 save_public_booking(booking_request)
                 
-                st.success("🎉 Booking request submitted successfully!")
-                st.info(f"Your booking request has been sent to {owner_name}. You will be contacted soon for confirmation.")
+                # Store booking summary for display
+                st.session_state.last_booking_summary = {
+                    'car_name': selected_car['car_name'],
+                    'car_model': selected_car['model'],
+                    'owner_name': owner_name,
+                    'start_date': start_date.strftime('%Y-%m-%d'),
+                    'end_date': end_date.strftime('%Y-%m-%d'),
+                    'duration': (end_date - start_date).days + 1,
+                    'client_name': client_name,
+                    'client_phone': client_phone
+                }
                 
-                # Show booking summary
-                st.markdown("#### 📋 Booking Summary")
-                st.write(f"**Car:** {selected_car['car_name']} - {selected_car['model']}")
-                st.write(f"**Owner:** {owner_name}")
-                st.write(f"**Dates:** {start_date} to {end_date}")
-                st.write(f"**Duration:** {(end_date - start_date).days + 1} days")
-                st.write(f"**Customer:** {client_name}")
-                st.write(f"**Phone:** {client_phone}")
-                
-                if st.button("Submit Another Booking"):
-                    st.rerun()
+                # Set flag to show success message
+                st.session_state.booking_submitted = True
+                st.rerun()
 
 # ---------- Enhanced Sidebar with Data Management ----------
 def show_data_management_section():
