@@ -338,12 +338,24 @@ def main_app():
         if user_pending:
             st.write(f"⏳ Pending Requests: {len(user_pending)}")
         
-        # Public booking link
+        # Enhanced Public booking link section
         st.markdown("---")
-        st.markdown("### 🌐 Public Booking")
-        public_url = "Add ?page=booking to your URL"
-        st.code(public_url)
-        st.caption("Share this URL with customers for self-service booking")
+        st.markdown("### 🌐 Your Booking Link")
+        
+        # Generate user-specific booking URL
+        base_url = "https://motoka.streamlit.app"  # Replace with your actual URL
+        user_booking_url = f"{base_url}/?page=booking&owner={user_prefix}"
+        
+        st.code(user_booking_url, language="text")
+        st.caption("🔗 Share this unique link with your customers")
+        
+        # Copy button simulation
+        if st.button("📋 Copy Link"):
+            st.success("✅ Link copied! Share it with your customers.")
+            st.balloons()
+        
+        # QR Code suggestion
+        st.markdown("💡 **Tip:** Create a QR code with this URL for easy sharing!")
         
         # ---------- Logout ----------
         if st.button("🚪 Logout"):
@@ -884,185 +896,19 @@ def load_pending_bookings():
         st.session_state.pending_bookings = pending_df.to_dict('records') if not pending_df.empty else []
     return st.session_state.pending_bookings
 
-def get_all_available_cars():
-    """Get all cars from all users for public booking"""
-    all_cars = []
-    if 'persistent_data' in st.session_state:
-        for key, data in st.session_state.persistent_data.get('cars', {}).items():
-            if isinstance(data, list) and data:
-                owner = key.split('_')[0] if '_' in key else 'Unknown'
-                for car in data:
-                    car_copy = car.copy()
-                    car_copy['owner'] = owner
-                    all_cars.append(car_copy)
-    return pd.DataFrame(all_cars)
+def get_owner_cars(owner_username):
+    """Get cars for a specific owner only"""
+    owner_cars = load_data("cars.csv", ["id", "car_name", "plate_number", "model", "status", "last_service_date", "next_service_date"], owner_username)
+    if not owner_cars.empty:
+        owner_cars['owner'] = owner_username
+    return owner_cars
 
-# ---------- Public Booking Page ----------
+# ---------- User-Specific Public Booking Page ----------
 def show_public_booking():
     st.markdown("# 🚗 Car Rental Booking")
-    st.markdown("### Book your perfect car rental")
     
-    # Get all available cars
-    all_cars = get_all_available_cars()
-    
-    if all_cars.empty:
-        st.error("No cars available for booking at the moment. Please try again later.")
-        return
-    
-    available_cars = all_cars[all_cars['status'] == 'Available']
-    
-    if available_cars.empty:
-        st.warning("All cars are currently booked. Please check back later or contact us directly.")
-        st.markdown("### All Cars (Check availability)")
-        st.dataframe(all_cars[['car_name', 'model', 'plate_number', 'status', 'owner']], use_container_width=True)
-        return
-    
-    # Show available cars
-    st.markdown("### Available Cars")
-    display_cars = available_cars[['car_name', 'model', 'plate_number', 'owner']].copy()
-    st.dataframe(display_cars, use_container_width=True)
-    
-    # Booking form
-    with st.form("public_booking"):
-        st.markdown("#### 📝 Booking Details")
-        
-        # Car selection
-        car_options = available_cars.apply(lambda x: f"{x['car_name']} - {x['model']} (Owner: {x['owner']})", axis=1)
-        selected_car_idx = st.selectbox("Select Car", range(len(available_cars)), 
-                                       format_func=lambda x: car_options.iloc[x])
-        
-        selected_car = available_cars.iloc[selected_car_idx] if selected_car_idx is not None else None
-        
-        # Customer details
-        col1, col2 = st.columns(2)
-        with col1:
-            client_name = st.text_input("Your Full Name *", placeholder="John Doe")
-            client_phone = st.text_input("Phone Number *", placeholder="+256 XXX XXX XXX")
-            start_date = st.date_input("Start Date *", min_value=dt.date.today())
-        
-        with col2:
-            client_email = st.text_input("Email Address", placeholder="john@example.com")
-            purpose = st.text_input("Purpose of Rental", placeholder="Business trip, vacation, etc.")
-            end_date = st.date_input("End Date *", min_value=dt.date.today())
-        
-        # Additional info
-        additional_notes = st.text_area("Additional Notes", placeholder="Any special requirements or questions...")
-        
-        # Terms and conditions
-        agree_terms = st.checkbox("I agree to the terms and conditions *")
-        
-        if st.form_submit_button("🚀 Submit Booking Request", type="primary"):
-            if not all([client_name, client_phone, start_date, end_date, agree_terms]):
-                st.error("Please fill in all required fields (*) and agree to terms.")
-            elif end_date < start_date:
-                st.error("End date must be after start date.")
-            elif selected_car is None:
-                st.error("Please select a car.")
-            else:
-                # Create booking request
-                booking_request = {
-                    'owner': selected_car['owner'],
-                    'car_id': selected_car['id'],
-                    'car_name': selected_car['car_name'],
-                    'car_model': selected_car['model'],
-                    'plate_number': selected_car['plate_number'],
-                    'client_name': client_name,
-                    'client_phone': client_phone,
-                    'client_email': client_email,
-                    'start_date': start_date.strftime('%Y-%m-%d'),
-                    'end_date': end_date.strftime('%Y-%m-%d'),
-                    'purpose': purpose,
-                    'additional_notes': additional_notes
-                }
-                
-                save_public_booking(booking_request)
-                
-                st.success("🎉 Booking request submitted successfully!")
-                st.info("Your booking request has been sent to the car owner. You will be contacted soon for confirmation.")
-                
-                # Show booking summary
-                st.markdown("#### 📋 Booking Summary")
-                st.write(f"**Car:** {selected_car['car_name']} - {selected_car['model']}")
-                st.write(f"**Owner:** {selected_car['owner']}")
-                st.write(f"**Dates:** {start_date} to {end_date}")
-                st.write(f"**Duration:** {(end_date - start_date).days + 1} days")
-                st.write(f"**Customer:** {client_name}")
-                st.write(f"**Phone:** {client_phone}")
-                
-                if st.button("Submit Another Booking"):
-                    st.rerun()
-
-# ---------- Enhanced Sidebar with Data Management ----------
-def show_data_management_section():
-    """Show data management options in sidebar"""
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 📊 Data Management")
-    
-    # Export data
-    if st.sidebar.button("📤 Export Data"):
-        user_prefix = st.session_state.username
-        export_data = {
-            'cars': st.session_state.cars.to_dict('records') if not st.session_state.cars.empty else [],
-            'bookings': st.session_state.bookings.to_dict('records') if not st.session_state.bookings.empty else [],
-            'expenses': st.session_state.expenses.to_dict('records') if not st.session_state.expenses.empty else [],
-            'export_date': dt.datetime.now().isoformat(),
-            'user': user_prefix
-        }
-        
-        st.sidebar.download_button(
-            label="💾 Download Backup",
-            data=json.dumps(export_data, indent=2),
-            file_name=f"{user_prefix}_backup_{dt.date.today().strftime('%Y%m%d')}.json",
-            mime="application/json"
-        )
-    
-    # Import data
-    uploaded_file = st.sidebar.file_uploader("📥 Import Backup", type=['json'])
-    if uploaded_file is not None:
-        try:
-            import_data = json.load(uploaded_file)
-            user_prefix = st.session_state.username
-            
-            # Restore data with validation
-            if 'cars' in import_data and import_data['cars']:
-                st.session_state.cars = pd.DataFrame(import_data['cars'])
-                save_data(st.session_state.cars, "cars.csv", user_prefix)
-            
-            if 'bookings' in import_data and import_data['bookings']:
-                st.session_state.bookings = pd.DataFrame(import_data['bookings'])
-                save_data(st.session_state.bookings, "bookings.csv", user_prefix)
-            
-            if 'expenses' in import_data and import_data['expenses']:
-                st.session_state.expenses = pd.DataFrame(import_data['expenses'])
-                save_data(st.session_state.expenses, "expenses.csv", user_prefix)
-            
-            st.sidebar.success("✅ Data imported and saved successfully!")
-            st.rerun()
-        except Exception as e:
-            st.sidebar.error(f"❌ Import failed: {str(e)}")
-
-# ---------- App Entry Point with Fixed URL Handling ----------
-def main():
-    # Check URL parameters for public booking
+    # Get owner from URL parameters
     try:
         query_params = dict(st.query_params)
-    except Exception:
-        query_params = {}
-    
-    if query_params.get("page") == "booking":
-        show_public_booking()
-    else:
-        if 'logged_in' not in st.session_state:
-            st.session_state.logged_in = False
-
-        if st.session_state.logged_in:
-            main_app()
-        else:
-            show_login()
-
-# Run the app
-if __name__ == "__main__":
-    main()
-else:
-    # When running in Streamlit, call main directly
-    main()
+        owner_username = query_params.get("owner")
+   
