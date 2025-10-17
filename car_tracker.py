@@ -42,7 +42,8 @@ def init_persistent_storage():
             'users': {},
             'cars': {},
             'bookings': {},
-            'expenses': {}
+            'expenses': {},
+            'pending_bookings': {}  # Add pending_bookings to initial storage
         }
 
 def save_to_persistent_storage(data_type, user_id, data):
@@ -380,6 +381,17 @@ def main_app():
     if menu == "📊 Dashboard":
         st.markdown("# 📊 Business Dashboard")
         
+        # Load pending bookings for current user
+        pending_bookings = load_pending_bookings()
+        user_pending = [b for b in pending_bookings if b.get('owner') == user_prefix and b.get('status') == 'Pending']
+        
+        # Debug info (remove in production)
+        if st.sidebar.checkbox("🔍 Debug Info"):
+            st.sidebar.write(f"Total pending bookings: {len(pending_bookings)}")
+            st.sidebar.write(f"User pending bookings: {len(user_pending)}")
+            if pending_bookings:
+                st.sidebar.write("Sample booking owners:", [b.get('owner', 'No owner') for b in pending_bookings[:3]])
+        
         # Pending bookings notification
         if user_pending:
             st.warning(f"⚠️ You have {len(user_pending)} pending booking requests!")
@@ -389,17 +401,20 @@ def main_app():
                     col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
                     
                     with col1:
-                        st.write(f"**{booking['client_name']}** - {booking['car_name']}")
+                        st.write(f"**{booking['client_name']}** - {booking.get('car_name', 'Unknown Car')}")
                         st.write(f"📅 {booking['start_date']} to {booking['end_date']}")
                         st.write(f"📞 {booking['client_phone']}")
                         if booking.get('client_email'):
                             st.write(f"📧 {booking['client_email']}")
+                        if booking.get('purpose'):
+                            st.write(f"📝 Purpose: {booking['purpose']}")
                     
                     with col2:
                         if st.button("✅ Approve", key=f"approve_{booking['id']}"):
                             # Create confirmed booking
+                            new_booking_id = 1 if bookings.empty else int(bookings['id'].max()) + 1
                             new_booking = {
-                                "id": len(bookings)+1,
+                                "id": new_booking_id,
                                 "car_id": booking['car_id'],
                                 "client_name": booking['client_name'],
                                 "start_date": booking['start_date'],
@@ -408,17 +423,24 @@ def main_app():
                                 "status": "Confirmed"
                             }
                             
+                            # Add to bookings
                             st.session_state.bookings = pd.concat([bookings, pd.DataFrame([new_booking])], ignore_index=True)
+                            
+                            # Update car status
                             update_car_status(booking['car_id'], "Booked", user_prefix)
+                            
+                            # Save bookings
                             save_data(st.session_state.bookings, "bookings.csv", user_prefix)
                             
                             # Update pending booking status
                             for i, pb in enumerate(st.session_state.pending_bookings):
                                 if pb['id'] == booking['id']:
                                     st.session_state.pending_bookings[i]['status'] = 'Approved'
-                            save_to_persistent_storage('pending_bookings', None, pd.DataFrame(st.session_state.pending_bookings))
                             
-                            st.success("Booking approved!")
+                            # Save updated pending bookings
+                            st.session_state.persistent_data['pending_bookings']['pending_bookings'] = st.session_state.pending_bookings
+                            
+                            st.success("✅ Booking approved and added to your system!")
                             st.rerun()
                     
                     with col3:
@@ -432,9 +454,11 @@ def main_app():
                             for i, pb in enumerate(st.session_state.pending_bookings):
                                 if pb['id'] == booking['id']:
                                     st.session_state.pending_bookings[i]['status'] = 'Rejected'
-                            save_to_persistent_storage('pending_bookings', None, pd.DataFrame(st.session_state.pending_bookings))
                             
-                            st.success("Booking rejected!")
+                            # Save updated pending bookings
+                            st.session_state.persistent_data['pending_bookings']['pending_bookings'] = st.session_state.pending_bookings
+                            
+                            st.success("❌ Booking rejected!")
                             st.rerun()
                     
                     # Edit form for pending booking
@@ -454,8 +478,9 @@ def main_app():
                             with col_x:
                                 if st.form_submit_button("💾 Save & Approve"):
                                     # Create booking with edited details
+                                    new_booking_id = 1 if bookings.empty else int(bookings['id'].max()) + 1
                                     new_booking = {
-                                        "id": len(bookings)+1,
+                                        "id": new_booking_id,
                                         "car_id": booking['car_id'],
                                         "client_name": new_client_name,
                                         "start_date": new_start.strftime('%Y-%m-%d'),
@@ -464,7 +489,10 @@ def main_app():
                                         "status": "Confirmed"
                                     }
                                     
+                                    # Add to bookings
                                     st.session_state.bookings = pd.concat([bookings, pd.DataFrame([new_booking])], ignore_index=True)
+                                    
+                                    # Update car status and save
                                     update_car_status(booking['car_id'], "Booked", user_prefix)
                                     save_data(st.session_state.bookings, "bookings.csv", user_prefix)
                                     
@@ -472,102 +500,26 @@ def main_app():
                                     for i, pb in enumerate(st.session_state.pending_bookings):
                                         if pb['id'] == booking['id']:
                                             st.session_state.pending_bookings[i]['status'] = 'Approved'
-                                    save_to_persistent_storage('pending_bookings', None, pd.DataFrame(st.session_state.pending_bookings))
+                                    
+                                    # Save updated pending bookings
+                                    st.session_state.persistent_data['pending_bookings']['pending_bookings'] = st.session_state.pending_bookings
                                     
                                     del st.session_state[f"edit_booking_{booking['id']}"]
-                                    st.success("Booking edited and approved!")
+                                    st.success("✅ Booking edited and approved!")
                                     st.rerun()
                             
                             with col_y:
                                 if st.form_submit_button("❌ Cancel Edit"):
                                     del st.session_state[f"edit_booking_{booking['id']}"]
                                     st.rerun()
-                
-                st.divider()
-
-        # Key Metrics
-        total_income = 0
-        total_expenses = 0
-        
-        if not bookings.empty and "amount_paid" in bookings.columns:
-            total_income = pd.to_numeric(bookings["amount_paid"], errors='coerce').fillna(0).sum()
-        
-        if not expenses.empty and "amount" in expenses.columns:
-            total_expenses = pd.to_numeric(expenses["amount"], errors='coerce').fillna(0).sum()
-        
-        profit = total_income - total_expenses
-        
-        # Metrics Row
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("💰 Total Income", f"UGX {total_income:,.0f}")
-        with col2:
-            st.metric("🧾 Total Expenses", f"UGX {total_expenses:,.0f}")
-        with col3:
-            st.metric("📊 Net Profit", f"UGX {profit:,.0f}", delta=f"{((profit/total_income)*100) if total_income > 0 else 0:.1f}%")
-        with col4:
-            st.metric("🚗 Total Cars", len(cars))
-
-        # Charts Row
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("### 📈 Monthly Income Trend")
-            if not bookings.empty:
-                bookings_copy = bookings.copy()
-                bookings_copy['start_date'] = pd.to_datetime(bookings_copy['start_date'])
-                bookings_copy['month'] = bookings_copy['start_date'].dt.to_period('M').astype(str)
-                monthly_income = bookings_copy.groupby('month')['amount_paid'].sum().reset_index()
-                
-                fig = px.line(monthly_income, x='month', y='amount_paid', 
-                             title="Monthly Income", markers=True)
-                fig.update_layout(height=300)
-                st.plotly_chart(fig, use_container_width=True)
+                    
+                    st.divider()
+        else:
+            # Show message when no pending bookings
+            if len(pending_bookings) > 0:
+                st.info(f"ℹ️ No pending booking requests for you. Total system bookings: {len(pending_bookings)}")
             else:
-                st.info("No booking data available")
-
-        with col2:
-            st.markdown("### 🥧 Expense Breakdown")
-            if not expenses.empty:
-                expense_by_type = expenses.groupby('type')['amount'].sum().reset_index()
-                fig = px.pie(expense_by_type, values='amount', names='type', 
-                           title="Expenses by Type")
-                fig.update_layout(height=300)
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No expense data available")
-
-        # Status Overview with Quick Actions
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("### 🚗 Car Status Overview")
-            if not cars.empty:
-                status_counts = cars['status'].value_counts()
-                fig = px.bar(x=status_counts.index, y=status_counts.values, 
-                           title="Cars by Status", color=status_counts.index)
-                fig.update_layout(height=300)
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No cars registered")
-
-        with col2:
-            st.markdown("### ⚡ Quick Actions")
-            active_bookings = bookings[bookings['status'] == 'Booked'] if not bookings.empty else pd.DataFrame()
-            
-            if not active_bookings.empty:
-                st.markdown("**Complete Bookings:**")
-                for _, booking in active_bookings.iterrows():
-                    col_a, col_b = st.columns([3, 1])
-                    with col_a:
-                        st.write(f"📅 {booking['client_name']} - {booking['start_date']}")
-                    with col_b:
-                        if st.button("✅", key=f"complete_{booking['id']}", help="Complete booking"):
-                            if complete_booking(booking['id'], user_prefix):
-                                st.success("Booking completed!")
-                                st.rerun()
-            else:
-                st.info("No active bookings")
+                st.info("ℹ️ No pending booking requests. Share your booking link to receive requests!")
 
     # ---------- Enhanced Cars Section ----------
     elif menu == "🚗 Cars":
@@ -890,34 +842,36 @@ def save_public_booking(booking_data):
     if 'pending_bookings' not in st.session_state:
         st.session_state.pending_bookings = []
     
-    booking_data['id'] = len(st.session_state.pending_bookings) + 1
+    # Generate unique ID based on existing pending bookings
+    existing_ids = [pb.get('id', 0) for pb in st.session_state.pending_bookings]
+    booking_data['id'] = max(existing_ids) + 1 if existing_ids else 1
     booking_data['submission_date'] = dt.datetime.now().isoformat()
     booking_data['status'] = 'Pending'
     
     st.session_state.pending_bookings.append(booking_data)
     
-    # Save to persistent storage with error handling
+    # Save to persistent storage - use 'pending_bookings' as key directly
     try:
-        save_to_persistent_storage('pending_bookings', None, pd.DataFrame(st.session_state.pending_bookings))
-    except Exception as e:
-        # Fallback: directly save to persistent storage
         st.session_state.persistent_data['pending_bookings']['pending_bookings'] = st.session_state.pending_bookings
+    except Exception:
+        # Fallback initialization
+        st.session_state.persistent_data['pending_bookings'] = {'pending_bookings': st.session_state.pending_bookings}
 
 def load_pending_bookings():
     """Load pending bookings from storage"""
     if 'pending_bookings' not in st.session_state:
-        pending_df = load_from_persistent_storage('pending_bookings', None, 
-                                                 ["id", "owner", "car_id", "car_name", "client_name", "client_phone", 
-                                                  "client_email", "start_date", "end_date", "purpose", "submission_date", "status"])
-        st.session_state.pending_bookings = pending_df.to_dict('records') if not pending_df.empty else []
+        # Try to load from persistent storage
+        try:
+            if ('pending_bookings' in st.session_state.persistent_data and 
+                'pending_bookings' in st.session_state.persistent_data['pending_bookings']):
+                stored_data = st.session_state.persistent_data['pending_bookings']['pending_bookings']
+                st.session_state.pending_bookings = stored_data if isinstance(stored_data, list) else []
+            else:
+                st.session_state.pending_bookings = []
+        except Exception:
+            st.session_state.pending_bookings = []
+    
     return st.session_state.pending_bookings
-
-def get_owner_cars(owner_username):
-    """Get cars for a specific owner only"""
-    owner_cars = load_data("cars.csv", ["id", "car_name", "plate_number", "model", "status", "last_service_date", "next_service_date"], owner_username)
-    if not owner_cars.empty:
-        owner_cars['owner'] = owner_username
-    return owner_cars
 
 # ---------- User-Specific Public Booking Page ----------
 def show_public_booking():
