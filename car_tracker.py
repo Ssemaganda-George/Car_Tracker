@@ -334,6 +334,36 @@ def main_app():
     with st.sidebar:
         st.markdown(f"### Welcome, {st.session_state.full_name}! 👋")
         
+        # Notification icon for pending bookings
+        if user_pending:
+            st.markdown(f"""
+            <div style="
+                background: linear-gradient(90deg, #ff6b6b, #ee5a52);
+                color: white;
+                padding: 10px 15px;
+                border-radius: 10px;
+                margin: 10px 0;
+                text-align: center;
+                font-weight: bold;
+                box-shadow: 0 2px 10px rgba(255, 107, 107, 0.3);
+                animation: pulse 2s infinite;
+            ">
+                🔔 {len(user_pending)} New Booking Request{"s" if len(user_pending) > 1 else ""}!
+            </div>
+            <style>
+            @keyframes pulse {{
+                0% {{ box-shadow: 0 2px 10px rgba(255, 107, 107, 0.3); }}
+                50% {{ box-shadow: 0 2px 20px rgba(255, 107, 107, 0.6); }}
+                100% {{ box-shadow: 0 2px 10px rgba(255, 107, 107, 0.3); }}
+            }}
+            </style>
+            """, unsafe_allow_html=True)
+            
+            if st.button("🔔 View Requests", key="notification_btn", use_container_width=True):
+                # Force navigation to Dashboard
+                st.session_state.force_dashboard = True
+                st.rerun()
+        
         # Show data summary with pending bookings
         st.markdown("---")
         st.markdown("### 📈 Your Data Summary")
@@ -372,7 +402,35 @@ def main_app():
             st.rerun()
         
         st.markdown("---")
-        menu = st.radio("Navigation", ["📊 Dashboard", "🚗 Cars", "📅 Bookings", "💰 Expenses", "🔧 Maintenance"])
+        
+        # Force dashboard selection if notification clicked
+        if st.session_state.get('force_dashboard', False):
+            menu = "📊 Dashboard"
+            st.session_state.force_dashboard = False
+        else:
+            menu = st.radio("Navigation", ["📊 Dashboard", "🚗 Cars", "📅 Bookings", "💰 Expenses", "🔧 Maintenance"])
+        
+        # Add notification badge to Dashboard option
+        if user_pending:
+            st.markdown(f"""
+            <div style="
+                background: #ff6b6b;
+                color: white;
+                border-radius: 50%;
+                width: 20px;
+                height: 20px;
+                font-size: 12px;
+                font-weight: bold;
+                text-align: center;
+                line-height: 20px;
+                position: absolute;
+                margin-top: -35px;
+                margin-left: 120px;
+                z-index: 1000;
+            ">
+                {len(user_pending)}
+            </div>
+            """, unsafe_allow_html=True)
         
         # Add data management section
         show_data_management_section()
@@ -394,12 +452,38 @@ def main_app():
                 st.sidebar.write("Sample booking owners:", [b.get('owner', 'No owner') for b in pending_bookings[:3]])
                 st.sidebar.write("All pending bookings:", pending_bookings)
         
-        # Pending bookings notification
+        # Prominent pending bookings notification at top
         if user_pending:
-            st.warning(f"⚠️ You have {len(user_pending)} pending booking requests!")
+            st.markdown(f"""
+            <div style="
+                background: linear-gradient(135deg, #ff6b6b, #ee5a52);
+                color: white;
+                padding: 20px;
+                border-radius: 15px;
+                margin: 20px 0;
+                text-align: center;
+                font-size: 18px;
+                font-weight: bold;
+                box-shadow: 0 4px 20px rgba(255, 107, 107, 0.3);
+                border-left: 5px solid #fff;
+            ">
+                🔔 URGENT: You have {len(user_pending)} pending booking request{"s" if len(user_pending) > 1 else ""} waiting for your attention!
+            </div>
+            """, unsafe_allow_html=True)
             
             with st.expander("📋 Pending Booking Requests", expanded=True):
                 for booking in user_pending:
+                    # Add visual emphasis for each pending booking
+                    st.markdown(f"""
+                    <div style="
+                        background: rgba(255, 107, 107, 0.1);
+                        padding: 15px;
+                        border-radius: 10px;
+                        margin: 10px 0;
+                        border-left: 4px solid #ff6b6b;
+                    ">
+                    """, unsafe_allow_html=True)
+                    
                     col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
                     
                     with col1:
@@ -410,6 +494,19 @@ def main_app():
                             st.write(f"📧 {booking['client_email']}")
                         if booking.get('purpose'):
                             st.write(f"📝 Purpose: {booking['purpose']}")
+                        
+                        # Show time since submission
+                        try:
+                            submission_time = pd.to_datetime(booking.get('submission_date', ''))
+                            time_diff = dt.datetime.now() - submission_time
+                            hours_ago = int(time_diff.total_seconds() / 3600)
+                            if hours_ago < 1:
+                                minutes_ago = int(time_diff.total_seconds() / 60)
+                                st.caption(f"⏰ Submitted {minutes_ago} minutes ago")
+                            else:
+                                st.caption(f"⏰ Submitted {hours_ago} hours ago")
+                        except:
+                            st.caption("⏰ Recently submitted")
                     
                     with col2:
                         if st.button("✅ Approve", key=f"approve_{booking['id']}"):
